@@ -15,7 +15,7 @@ class FRSService:
     def __init__(self):
         """初始化FRS服务"""
         try:
-            from huaweicloudsdkcore.auth.credentials import BasicAuthenticator
+            from huaweicloudsdkcore.auth.credentials import BasicCredentials as BasicAuthenticator
             from huaweicloudsdkfrs.v2 import FrsClient, FrsClientBuilder
             from huaweicloudsdkfrs.v2.model import (
                 DetectFaceByBase64Request,
