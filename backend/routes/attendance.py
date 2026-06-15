@@ -27,8 +27,8 @@ async def detect_face(
             detail="缺少图片数据"
         )
 
-    # 检查FRS服务是否可用
-    if frs_service.client is None:
+    # 检查FRS服务是否可用（修改这里：检查 available 属性）
+    if not frs_service.available:
         logger_instance.error("FRS客户端未初始化，请检查华为云配置")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -54,13 +54,12 @@ async def detect_face(
         error_msg = str(e)
         logger_instance.error(f"人脸检测失败: {error_msg}")
 
-        # 根据错误类型返回不同的提示
-        if "APIG.0602" in error_msg or "Bad request" in error_msg:
+        if "Token" in error_msg or "配置" in error_msg:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="人脸检测请求格式错误，请检查图片格式是否正确"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"人脸识别服务配置错误: {error_msg}"
             )
-        elif "FRS.0501" in error_msg:
+        elif "未检测到人脸" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="未检测到人脸，请确保照片清晰且包含完整人脸"
@@ -87,8 +86,8 @@ async def sign_in(
             detail="缺少签到照片"
         )
 
-    # 检查FRS服务是否可用
-    if frs_service.client is None:
+    # 检查FRS服务是否可用（修改这里：检查 available 属性）
+    if not frs_service.available:
         logger_instance.error("FRS客户端未初始化，请检查华为云配置")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -137,7 +136,7 @@ async def sign_in(
     except Exception as e:
         error_msg = str(e)
         logger_instance.error(f"人脸比对服务调用失败: {error_msg}")
-        if "FRS.0501" in error_msg:
+        if "未检测到人脸" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="未检测到人脸，请确保照片清晰且包含完整人脸"
