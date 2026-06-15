@@ -1,20 +1,30 @@
 from sqlalchemy import Column, Integer, String, DateTime
-from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
+from models.base import Base
 
-Base = declarative_base()
 
 class User(Base):
     """用户模型"""
     __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String(20), unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    real_name = Column(String(50), nullable=False)
-    external_image_id = Column(String(64), index=True, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String(20), unique=True, index=True, nullable=False, comment="工号/学号")
+    password_hash = Column(String(255), nullable=False, comment="密码哈希值")
+    real_name = Column(String(50), nullable=False, comment="真实姓名")
+    external_image_id = Column(String(64), index=True, nullable=True, comment="华为云FRS中的人脸ID")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
+
     def __repr__(self):
         return f"<User(id={self.id}, user_id={self.user_id}, real_name={self.real_name})>"
+
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "real_name": self.real_name,
+            "external_image_id": self.external_image_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }

@@ -22,7 +22,7 @@ venv\Scripts\activate     # Windows
 pip install -r backend/requirements.txt
 
 # 4. 配置环境变量
-cp .env.example .env
+cp .env .env
 # 编辑 .env 文件，填入数据库、Redis、华为云配置
 
 # 5. 初始化数据库

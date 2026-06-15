@@ -86,7 +86,7 @@ pip install -r backend/requirements.txt
 ### 2.4 配置环境变量
 
 ```bash
-cp .env.example .env
+cp .env .env
 vim .env  # 编辑配置
 ```
 

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人脸识别签到系统</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="logo">📸 人脸识别签到系统</h1>
+            <div class="nav-links">
+                <button class="nav-btn active" data-page="login">登录</button>
+                <button class="nav-btn" data-page="register">注册</button>
+                <button class="nav-btn" data-page="signin">签到</button>
+            </div>
+            <div class="user-info" id="userInfo" style="display: none;">
+                <span id="userName"></span>
+                <button class="logout-btn" id="logoutBtn">退出</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <div class="container">
+        <!-- 登录页面 -->
+        <div id="loginPage" class="page active">
+            <div class="card">
+                <h2>🔐 用户登录</h2>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label>学号</label>
+                        <input type="text" id="loginUserID" placeholder="请输入学号" required>
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="loginPassword" placeholder="请输入密码" required>
+                    </div>
+                    <button type="submit" class="btn-primary">登录</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 注册页面 -->
+        <div id="registerPage" class="page">
+            <div class="card">
+                <h2>📝 用户注册</h2>
+                <form id="registerForm">
+                    <div class="form-group">
+                        <label>学号</label>
+                        <input type="text" id="regUserID" placeholder="请输入学号" required>
+                    </div>
+                    <div class="form-group">
+                        <label>真实姓名</label>
+                        <input type="text" id="regRealName" placeholder="请输入真实姓名" required>
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="regPassword" placeholder="请输入密码" required>
+                    </div>
+                    <div class="form-group">
+                        <label>确认密码</label>
+                        <input type="password" id="regConfirmPassword" placeholder="请再次输入密码" required>
+                    </div>
+
+                    <!-- 人脸拍照区域 -->
+                    <div class="face-capture-area">
+                        <label>人脸采集</label>
+                        <div class="video-container">
+                            <video id="registerVideo" autoplay playsinline></video>
+                            <canvas id="registerCanvas" style="display: none;"></canvas>
+                        </div>
+                        <div class="capture-controls">
+                            <button type="button" id="startCameraBtn" class="btn-secondary">📷 开启摄像头</button>
+                            <button type="button" id="capturePhotoBtn" class="btn-secondary" disabled>📸 拍照上传</button>
+                        </div>
+                        <div id="registerFacePreview" class="face-preview" style="display: none;">
+                            <img id="registerPreviewImg" alt="人脸预览">
+                            <span class="preview-status" id="registerFaceStatus"></span>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-primary" id="registerSubmitBtn" disabled>注册</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 签到页面 -->
+        <div id="signinPage" class="page">
+            <div class="card">
+                <h2>✅ 人脸签到</h2>
+
+                <!-- 签到方式选择 -->
+                <div class="sign-mode">
+                    <button type="button" id="cameraModeBtn" class="mode-btn active">📷 摄像头拍照</button>
+                    <button type="button" id="uploadModeBtn" class="mode-btn">📁 上传照片</button>
+                </div>
+
+                <!-- 摄像头模式 -->
+                <div id="cameraMode" class="sign-mode-content">
+                    <div class="face-capture-area">
+                        <div class="video-container">
+                            <video id="signVideo" autoplay playsinline></video>
+                            <canvas id="signCanvas" style="display: none;"></canvas>
+                        </div>
+                        <div class="capture-controls">
+                            <button type="button" id="startSignCameraBtn" class="btn-secondary">🎥 开启摄像头</button>
+                            <button type="button" id="captureSignPhotoBtn" class="btn-secondary" disabled>📸 拍照签到</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 上传照片模式 -->
+                <div id="uploadMode" class="sign-mode-content" style="display: none;">
+                    <div class="upload-area">
+                        <label class="upload-label">
+                            <input type="file" id="uploadImage" accept="image/jpeg,image/png" style="display: none;">
+                            <div class="upload-box">
+                                📤 点击或拖拽上传照片
+                                <small>支持 JPG、PNG 格式</small>
+                            </div>
+                        </label>
+                        <div id="uploadPreview" class="face-preview" style="display: none;">
+                            <img id="uploadPreviewImg" alt="上传预览">
+                        </div>
+                        <button type="button" id="uploadSignBtn" class="btn-primary" disabled>开始签到</button>
+                    </div>
+                </div>
+
+                <!-- 签到结果 -->
+                <div id="signResult" class="sign-result" style="display: none;">
+                    <h3>签到结果</h3>
+                    <div id="resultContent"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载提示 -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <p>处理中...</p>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

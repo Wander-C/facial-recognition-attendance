@@ -19,7 +19,7 @@ class Settings:
     # 数据库配置（修改为你之前创建的用户和数据库）
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "mysql+pymysql://face_user:YourDBPassword123@localhost:3306/face_sign_db"
+        "mysql+pymysql://root:123456@localhost:3306/face_sign_db"
     )
 
     # Redis配置（添加密码）
