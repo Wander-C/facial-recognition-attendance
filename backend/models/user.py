@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Text
 from datetime import datetime
 from models.base import Base
 
@@ -11,7 +11,7 @@ class User(Base):
     user_id = Column(String(20), unique=True, index=True, nullable=False, comment="工号/学号")
     password_hash = Column(String(255), nullable=False, comment="密码哈希值")
     real_name = Column(String(50), nullable=False, comment="真实姓名")
-    external_image_id = Column(String(64), index=True, nullable=True, comment="华为云FRS中的人脸ID")
+    face_image_base64 = Column(Text, nullable=True, comment="人脸照片Base64")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
 
@@ -24,7 +24,6 @@ class User(Base):
             "id": self.id,
             "user_id": self.user_id,
             "real_name": self.real_name,
-            "external_image_id": self.external_image_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

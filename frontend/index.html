@@ -11,14 +11,13 @@
     <nav class="navbar">
         <div class="nav-container">
             <h1 class="logo">📸 人脸识别签到系统</h1>
-            <div class="nav-links">
+            <div class="nav-links" id="navLinks">
                 <button class="nav-btn active" data-page="login">登录</button>
                 <button class="nav-btn" data-page="register">注册</button>
-                <button class="nav-btn" data-page="signin">签到</button>
             </div>
             <div class="user-info" id="userInfo" style="display: none;">
-                <span id="userName"></span>
-                <button class="logout-btn" id="logoutBtn">退出</button>
+                <span id="userName">用户</span>
+                <button class="logout-btn" id="logoutBtn">退出登录</button>
             </div>
         </div>
     </nav>
@@ -40,6 +39,10 @@
                     </div>
                     <button type="submit" class="btn-primary">登录</button>
                 </form>
+                <div class="form-footer">
+                    <span>还没有账号？</span>
+                    <button type="button" id="goToRegisterBtn" class="link-btn">立即注册</button>
+                </div>
             </div>
         </div>
 
@@ -67,15 +70,33 @@
 
                     <!-- 人脸拍照区域 -->
                     <div class="face-capture-area">
-                        <label>人脸采集</label>
+                        <label>人脸采集（请正对摄像头）</label>
                         <div class="video-container">
                             <video id="registerVideo" autoplay playsinline></video>
                             <canvas id="registerCanvas" style="display: none;"></canvas>
                         </div>
                         <div class="capture-controls">
                             <button type="button" id="startCameraBtn" class="btn-secondary">📷 开启摄像头</button>
-                            <button type="button" id="capturePhotoBtn" class="btn-secondary" disabled>📸 拍照上传</button>
+                            <button type="button" id="capturePhotoBtn" class="btn-secondary" disabled>📸 拍照</button>
                         </div>
+
+                        <!-- 拍照后的确认区域 -->
+                        <div id="capturedPhotoArea" style="display: none;">
+                            <div class="captured-photo-container">
+                                <img id="capturedPhotoImg" alt="拍摄的照片">
+                                <div class="captured-buttons">
+                                    <button type="button" id="confirmPhotoBtn" class="btn-primary" disabled>✅ 确认使用此照片</button>
+                                    <button type="button" id="retakePhotoBtn" class="btn-secondary">📷 重新拍照</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 人脸检测结果 -->
+                        <div id="faceDetectResult" class="face-detect-result" style="display: none;">
+                            <div id="detectStatus"></div>
+                        </div>
+
+                        <!-- 最终预览 -->
                         <div id="registerFacePreview" class="face-preview" style="display: none;">
                             <img id="registerPreviewImg" alt="人脸预览">
                             <span class="preview-status" id="registerFaceStatus"></span>
@@ -84,13 +105,18 @@
 
                     <button type="submit" class="btn-primary" id="registerSubmitBtn" disabled>注册</button>
                 </form>
+                <div class="form-footer">
+                    <span>已有账号？</span>
+                    <button type="button" id="goToLoginBtn" class="link-btn">立即登录</button>
+                </div>
             </div>
         </div>
 
-        <!-- 签到页面 -->
+        <!-- 签到页面（登录后可见） -->
         <div id="signinPage" class="page">
             <div class="card">
                 <h2>✅ 人脸签到</h2>
+                <div class="welcome-message" id="welcomeMessage"></div>
 
                 <!-- 签到方式选择 -->
                 <div class="sign-mode">
