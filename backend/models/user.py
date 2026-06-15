@@ -24,6 +24,7 @@ class User(Base):
             "id": self.id,
             "user_id": self.user_id,
             "real_name": self.real_name,
+            "has_face": self.face_image_base64 is not None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

@@ -2,18 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-from passlib.context import CryptContext
 from jose import jwt, JWTError
-import base64
+from typing import Optional
+import logging
 
 from utils.database import get_db
+from utils.security import hash_password, verify_password
 from models.user import User
 from config import get_settings
+from services.frs_service import frs_service
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
 security = HTTPBearer()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/register")
@@ -21,14 +23,13 @@ async def register(
         request: dict = Body(...),
         db: Session = Depends(get_db)
 ):
-    """用户注册 - 保存用户信息和人脸照片"""
-
+    """用户注册：检测人脸后，直接将照片Base64存入数据库"""
     user_id = request.get("user_id")
     password = request.get("password")
     real_name = request.get("real_name")
     face_image_base64 = request.get("face_image_base64")
 
-    # 验证必填字段
+    # 1. 基础校验
     if not user_id or not password or not real_name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -41,7 +42,7 @@ async def register(
             detail="请先拍照上传人脸"
         )
 
-    # 检查学号是否已存在
+    # 2. 检查用户是否已存在
     existing_user = db.query(User).filter(User.user_id == user_id).first()
     if existing_user:
         raise HTTPException(
@@ -49,19 +50,36 @@ async def register(
             detail="学号已存在"
         )
 
-    # 创建新用户
-    hashed_password = pwd_context.hash(password)
+    # 3. 使用华为云API检测人脸是否有效
+    try:
+        detect_result = frs_service.detect_face(face_image_base64)
+        if not detect_result.get("has_face"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="照片中未检测到有效人脸，请重新拍摄"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"人脸检测API调用失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"人脸检测服务异常: {str(e)}"
+        )
+
+    # 4. 保存用户信息（包含原始人脸照片Base64）
+    hashed_password = hash_password(password)
     new_user = User(
         user_id=user_id,
         password_hash=hashed_password,
         real_name=real_name,
         face_image_base64=face_image_base64
     )
-
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
+    logger.info(f"用户 {new_user.user_id} 注册成功")
     return {
         "success": True,
         "message": "注册成功",
@@ -76,7 +94,6 @@ async def login(
         db: Session = Depends(get_db)
 ):
     """用户登录"""
-
     user_id = request.get("user_id")
     password = request.get("password")
 
@@ -95,7 +112,7 @@ async def login(
         )
 
     # 验证密码
-    if not pwd_context.verify(password, user.password_hash):
+    if not verify_password(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="学号或密码错误"
@@ -146,11 +163,13 @@ def get_current_user(
 
 
 def get_current_user_optional(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
         db: Session = Depends(get_db)
 ) -> User | None:
     """获取当前登录用户（可选）"""
     try:
+        if credentials is None:
+            return None
         return get_current_user(credentials, db)
     except HTTPException:
         return None

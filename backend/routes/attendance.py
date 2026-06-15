@@ -1,94 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi import Body
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from loguru import logger
-import base64
-import io
-from PIL import Image
 
 from utils.database import get_db
 from models.user import User
 from models.attendance_log import AttendanceLog
 from routes.auth import get_current_user
+from services.frs_service import frs_service
 from config import get_settings
 
 router = APIRouter()
 logger_instance = logger
 settings = get_settings()
 
-# 初始化华为云 FRS 客户端
-try:
-    from huaweicloudsdkcore.auth.credentials import BasicCredentials
-    from huaweicloudsdkfrs.v2 import FrsClient
-    from huaweicloudsdkfrs.v2.region.frs_region import FrsRegion
-    from huaweicloudsdkfrs.v2.model import (
-        DetectFaceByBase64Request,
-        SearchFaceByBase64Request,
-        AddFacesByBase64Request
-    )
-
-    # 创建认证对象
-    auth = BasicCredentials(
-        ak=settings.HWC_AK,
-        sk=settings.HWC_SK,
-        project_id=settings.HWC_PROJECT_ID
-    )
-
-    # 创建客户端
-    frs_client = FrsClient.new_builder() \
-        .with_credentials(auth) \
-        .with_region(FrsRegion.value_of(settings.HWC_REGION_NAME)) \
-        .build()
-
-    FRS_AVAILABLE = True
-    logger_instance.info("华为云 FRS 客户端初始化成功")
-
-except Exception as e:
-    FRS_AVAILABLE = False
-    logger_instance.error(f"华为云 FRS 客户端初始化失败: {str(e)}")
-    frs_client = None
-
-
-def compress_image(image_base64: str, max_size_kb: int = 500) -> str:
-    """压缩图片到指定大小以内（华为云有图片大小限制）"""
-    try:
-        image_data = base64.b64decode(image_base64)
-        img = Image.open(io.BytesIO(image_data))
-
-        # 如果是 RGBA 模式，转换为 RGB
-        if img.mode == 'RGBA':
-            img = img.convert('RGB')
-
-        # 压缩图片
-        output = io.BytesIO()
-        quality = 85
-        img.save(output, format='JPEG', quality=quality, optimize=True)
-
-        # 如果还是太大，继续压缩
-        while len(output.getvalue()) > max_size_kb * 1024 and quality > 30:
-            quality -= 10
-            output = io.BytesIO()
-            img.save(output, format='JPEG', quality=quality, optimize=True)
-
-        return base64.b64encode(output.getvalue()).decode('utf-8')
-    except Exception as e:
-        logger_instance.warning(f"图片压缩失败: {str(e)}")
-        return image_base64
-
 
 @router.post("/detect-face")
 async def detect_face(
         request: dict = Body(...),
 ):
-    """使用华为云 FRS 检测图片中是否有人脸"""
-
-    if not FRS_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="人脸识别服务未初始化，请检查华为云配置"
-        )
-
+    """检测图片中是否有人脸（注册时使用）"""
     image_base64 = request.get("image_base64")
     if not image_base64:
         raise HTTPException(
@@ -96,19 +27,19 @@ async def detect_face(
             detail="缺少图片数据"
         )
 
+    # 检查FRS服务是否可用
+    if frs_service.client is None:
+        logger_instance.error("FRS客户端未初始化，请检查华为云配置")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="人脸识别服务未就绪，请联系管理员检查华为云配置"
+        )
+
     try:
-        # 压缩图片
-        compressed_base64 = compress_image(image_base64)
+        # 调用FRS服务检测
+        result = frs_service.detect_face(image_base64)
 
-        # 创建检测请求 - 正确的设置方式
-        detect_request = DetectFaceByBase64Request()
-        # 直接设置 image_base64 属性
-        detect_request.image_base64 = compressed_base64
-
-        # 调用华为云 API
-        response = frs_client.detect_face_by_base64(detect_request)
-
-        face_count = len(response.faces) if hasattr(response, 'faces') and response.faces else 0
+        face_count = result.get("face_count", 0)
 
         logger_instance.info(f"人脸检测完成，检测到 {face_count} 张人脸")
 
@@ -120,127 +51,25 @@ async def detect_face(
         }
 
     except Exception as e:
-        logger_instance.error(f"人脸检测失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"人脸检测失败: {str(e)}"
-        )
+        error_msg = str(e)
+        logger_instance.error(f"人脸检测失败: {error_msg}")
 
-
-@router.post("/search-face")
-async def search_face_in_frs(
-        request: dict = Body(...),
-):
-    """在华为云人脸库中搜索匹配的人脸（用于签到）"""
-
-    if not FRS_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="人脸识别服务未初始化"
-        )
-
-    image_base64 = request.get("image_base64")
-    if not image_base64:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少图片数据"
-        )
-
-    try:
-        # 压缩图片
-        compressed_base64 = compress_image(image_base64)
-
-        # 创建搜索请求 - 正确的设置方式
-        search_request = SearchFaceByBase64Request()
-        search_request.image_base64 = compressed_base64
-        search_request.face_set_name = settings.FRS_FACE_SET_NAME
-        search_request.match_threshold = int(settings.FRS_SIMILARITY_THRESHOLD * 100)
-
-        # 调用华为云 API
-        response = frs_client.search_face_by_base64(search_request)
-
-        faces = []
-        if hasattr(response, 'faces') and response.faces:
-            for face in response.faces:
-                faces.append({
-                    "face_id": getattr(face, 'face_id', None),
-                    "external_image_id": getattr(face, 'external_image_id', None),
-                    "similarity": getattr(face, 'similarity', 0)
-                })
-
-        return {
-            "success": True,
-            "faces": faces,
-            "face_count": len(faces)
-        }
-
-    except Exception as e:
-        logger_instance.error(f"人脸搜索失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"人脸搜索失败: {str(e)}"
-        )
-
-
-@router.post("/add-face-to-frs")
-async def add_face_to_frs(
-        request: dict = Body(...),
-):
-    """将人脸添加到华为云人脸库（用于注册）"""
-
-    if not FRS_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="人脸识别服务未初始化"
-        )
-
-    image_base64 = request.get("image_base64")
-    external_image_id = request.get("external_image_id")
-
-    if not image_base64:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少图片数据"
-        )
-
-    if not external_image_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少 external_image_id"
-        )
-
-    try:
-        # 压缩图片
-        compressed_base64 = compress_image(image_base64)
-
-        # 创建添加请求 - 正确的设置方式
-        add_request = AddFacesByBase64Request()
-        add_request.image_base64 = compressed_base64
-        add_request.external_image_id = external_image_id
-        add_request.face_set_name = settings.FRS_FACE_SET_NAME
-
-        # 调用华为云 API
-        response = frs_client.add_faces_by_base64(add_request)
-
-        face_id = None
-        if hasattr(response, 'faces') and response.faces:
-            face_id = getattr(response.faces[0], 'face_id', None)
-
-        logger_instance.info(f"人脸添加成功，external_image_id: {external_image_id}")
-
-        return {
-            "success": True,
-            "external_image_id": external_image_id,
-            "face_id": face_id,
-            "message": "人脸上传成功"
-        }
-
-    except Exception as e:
-        logger_instance.error(f"人脸上传失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"人脸上传失败: {str(e)}"
-        )
+        # 根据错误类型返回不同的提示
+        if "APIG.0602" in error_msg or "Bad request" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="人脸检测请求格式错误，请检查图片格式是否正确"
+            )
+        elif "FRS.0501" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="未检测到人脸，请确保照片清晰且包含完整人脸"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"人脸检测失败: {error_msg}"
+            )
 
 
 @router.post("/sign")
@@ -250,95 +79,98 @@ async def sign_in(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """用户签到 - 使用华为云 FRS 搜索人脸"""
-
-    image_base64 = request.get("image_base64")
-    if not image_base64:
+    """用户签到：将签到照片与数据库中存储的注册照片进行比对"""
+    sign_image_base64 = request.get("image_base64")
+    if not sign_image_base64:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少图片数据"
+            detail="缺少签到照片"
         )
 
-    if not FRS_AVAILABLE:
+    # 检查FRS服务是否可用
+    if frs_service.client is None:
+        logger_instance.error("FRS客户端未初始化，请检查华为云配置")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="人脸识别服务未初始化"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="人脸识别服务未就绪，请联系管理员检查华为云配置"
         )
 
+    # 1. 从数据库获取该用户注册时的人脸照片
+    registered_face_base64 = current_user.face_image_base64
+    if not registered_face_base64:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="您尚未注册人脸信息，请联系管理员"
+        )
+
+    # 2. 检查今日是否已签到
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+
+    existing_sign = db.query(AttendanceLog).filter(
+        AttendanceLog.user_id == current_user.id,
+        AttendanceLog.sign_time >= today_start,
+        AttendanceLog.sign_time < today_end
+    ).first()
+
+    if existing_sign:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="今日已签到，请勿重复签到"
+        )
+
+    # 3. 调用华为云人脸比对服务
     try:
-        # 压缩图片
-        compressed_base64 = compress_image(image_base64)
+        compare_result = frs_service.compare_faces(registered_face_base64, sign_image_base64)
+        similarity = compare_result.get("similarity", 0.0)
+        threshold = settings.FRS_SIMILARITY_THRESHOLD
 
-        # 在华为云人脸库中搜索
-        search_request = SearchFaceByBase64Request()
-        search_request.image_base64 = compressed_base64
-        search_request.face_set_name = settings.FRS_FACE_SET_NAME
-        search_request.match_threshold = int(settings.FRS_SIMILARITY_THRESHOLD * 100)
+        logger_instance.info(f"用户 {current_user.user_id} 人脸比对相似度: {similarity:.4f}, 阈值: {threshold}")
 
-        response = frs_client.search_face_by_base64(search_request)
-
-        if not hasattr(response, 'faces') or not response.faces:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="未能识别人脸，请重试"
-            )
-
-        # 获取最佳匹配
-        best_match = response.faces[0]
-        similarity = float(getattr(best_match, 'similarity', 0))
-        external_image_id = getattr(best_match, 'external_image_id', None)
-
-        # 检查相似度阈值
-        if similarity < settings.FRS_SIMILARITY_THRESHOLD:
+        if similarity < threshold:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"人脸匹配度不足（{similarity:.2%}），请重试"
+                detail=f"人脸验证不通过 (相似度: {similarity:.2%}，需大于 {threshold:.0%})"
             )
-
-        # 根据 external_image_id 查找用户
-        user = db.query(User).filter(User.external_image_id == external_image_id).first()
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="未找到对应的用户"
-            )
-
-        # 获取客户端IP
-        client_ip = req.client.host if req else "unknown"
-
-        # 保存签到记录
-        attendance_log = AttendanceLog(
-            user_id=user.id,
-            sign_time=datetime.utcnow(),
-            similarity=similarity,
-            sign_image_url=f"/uploads/{user.id}_{datetime.utcnow().timestamp()}.jpg",
-            ip_address=client_ip
-        )
-
-        db.add(attendance_log)
-        db.commit()
-
-        logger_instance.info(f"用户 {user.user_id} 签到成功，相似度: {similarity}")
-
-        return {
-            "success": True,
-            "message": "签到成功",
-            "user_id": user.user_id,
-            "user_name": user.real_name,
-            "sign_time": attendance_log.sign_time.isoformat(),
-            "similarity": similarity,
-            "log_id": attendance_log.id
-        }
-
     except HTTPException:
         raise
     except Exception as e:
-        logger_instance.error(f"签到失败: {str(e)}")
+        error_msg = str(e)
+        logger_instance.error(f"人脸比对服务调用失败: {error_msg}")
+        if "FRS.0501" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="未检测到人脸，请确保照片清晰且包含完整人脸"
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"签到失败: {str(e)}"
+            detail=f"签到服务异常: {error_msg}"
         )
+
+    # 4. 记录签到成功
+    client_ip = req.client.host if req else None
+
+    attendance_log = AttendanceLog(
+        user_id=current_user.id,
+        sign_time=datetime.utcnow(),
+        similarity=similarity,
+        sign_image_url=None,
+        ip_address=client_ip
+    )
+    db.add(attendance_log)
+    db.commit()
+
+    logger_instance.info(f"用户 {current_user.user_id} 签到成功，相似度: {similarity:.4f}")
+
+    return {
+        "success": True,
+        "message": "签到成功",
+        "user_id": current_user.user_id,
+        "user_name": current_user.real_name,
+        "sign_time": attendance_log.sign_time.isoformat(),
+        "similarity": similarity,
+        "log_id": attendance_log.id
+    }
 
 
 @router.get("/sign_in_status")
