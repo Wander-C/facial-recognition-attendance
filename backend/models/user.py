@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from datetime import datetime
 from models.base import Base
 
@@ -11,7 +12,7 @@ class User(Base):
     user_id = Column(String(20), unique=True, index=True, nullable=False, comment="工号/学号")
     password_hash = Column(String(255), nullable=False, comment="密码哈希值")
     real_name = Column(String(50), nullable=False, comment="真实姓名")
-    face_image_base64 = Column(Text, nullable=True, comment="人脸照片Base64")
+    face_image_base64 = Column(MEDIUMTEXT, nullable=True, comment="人脸照片Base64")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
 

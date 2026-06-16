@@ -153,7 +153,7 @@ async def sign_in(
         user_id=current_user.id,
         sign_time=datetime.utcnow(),
         similarity=similarity,
-        sign_image_url=None,
+        sign_image_url="",
         ip_address=client_ip
     )
     db.add(attendance_log)

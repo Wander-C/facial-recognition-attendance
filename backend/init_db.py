@@ -34,8 +34,17 @@ def create_database():
     password = user_pass_parts[1] if len(user_pass_parts) > 1 else ""
     
     host_parts = host_db.split('/')
-    host = host_parts[0]
+    host_port = host_parts[0]
     database = host_parts[1] if len(host_parts) > 1 else "attendance_system"
+
+    # 分离主机和端口
+    if ':' in host_port:
+        host, port = host_port.split(':')
+        port = int(port)
+    else:
+        host = host_port
+        port = 3306
+
     
     # 创建临时连接以创建数据库
     try:
@@ -44,7 +53,7 @@ def create_database():
             host=host,
             user=user,
             password=password,
-            port=3306
+            port=port
         )
         cursor = conn.cursor()
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database}")
