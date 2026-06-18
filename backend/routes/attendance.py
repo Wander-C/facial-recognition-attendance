@@ -117,26 +117,26 @@ async def sign_in(
                 detail=f"人脸验证不通过，最高相似度: {best_similarity:.2%}，需大于 {threshold:.0%}"
             )
 
-        logger.info(f"✅ 匹配到用户: {matched_user.user_id} ({matched_user.real_name})")
+        logger.info(f"✅ 匹配到用户: ID={matched_user.id}, 学号={matched_user.user_id}, 姓名={matched_user.real_name}")
 
-        # 3. ⚠️ 先写入签到记录（每次都写入）
-        now = datetime.utcnow()
+        # 3. 写入签到记录（存用户自增主键 ID，使用系统本地时间）
+        now = datetime.now()
         attendance_log = AttendanceLog(
-            user_id=matched_user.id,
+            user_id=matched_user.id,  # ← 存自增主键 ID
             sign_time=now
         )
         db.add(attendance_log)
         db.commit()
 
-        logger.info(f"✅ 签到记录已写入数据库，ID: {attendance_log.id}")
+        logger.info(f"✅ 签到记录已写入数据库，ID: {attendance_log.id}, user_id: {attendance_log.user_id}")
 
-        # 4. 查询今日已签到次数
-        today = date.today()
+        # 4. 查询今日已签到次数（使用系统本地时间）
+        today = datetime.now().date()
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
 
         today_count = db.query(AttendanceLog).filter(
-            AttendanceLog.user_id == matched_user.id,
+            AttendanceLog.user_id == matched_user.id,  # ← 用自增主键 ID 查询
             AttendanceLog.sign_time >= today_start,
             AttendanceLog.sign_time <= today_end
         ).count()
@@ -146,7 +146,7 @@ async def sign_in(
         # 5. 返回结果
         return {
             "success": True,
-            "already_signed": today_count > 1,  # 如果大于1次，说明之前签过
+            "already_signed": today_count > 1,
             "message": f"签到成功！今日第 {today_count} 次签到",
             "user_id": matched_user.user_id,
             "user_name": matched_user.real_name,
@@ -174,18 +174,22 @@ async def get_today_status(
 ):
     """获取用户今日签到状态"""
     try:
-        today = date.today()
+        # 使用系统本地时间
+        today = datetime.now().date()
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
 
-        # 获取今日所有签到记录
+        logger.info(f"查询用户 {current_user.id} 今日签到, 范围: {today_start} ~ {today_end}")
+
+        # 用用户 ID 查询
         today_records = db.query(AttendanceLog).filter(
-            AttendanceLog.user_id == current_user.id,
+            AttendanceLog.user_id == current_user.id,  # ← 用自增主键 ID 查询
             AttendanceLog.sign_time >= today_start,
             AttendanceLog.sign_time <= today_end
         ).order_by(AttendanceLog.sign_time.desc()).all()
 
         today_count = len(today_records)
+        logger.info(f"用户 {current_user.id} 今日签到次数: {today_count}")
 
         if today_count > 0:
             latest = today_records[0]
@@ -220,8 +224,11 @@ async def get_my_records(
 ):
     """获取用户自己的签到记录（需要登录）"""
     try:
-        logger.info(f"获取用户 {current_user.id} 的签到记录, skip={skip}, limit={limit}")
+        logger.info(f"========== 查询签到记录 ==========")
+        logger.info(f"当前用户: id={current_user.id}, 学号={current_user.user_id}, 姓名={current_user.real_name}")
+        logger.info(f"分页: skip={skip}, limit={limit}")
 
+        # 用用户 ID 查询
         query = db.query(AttendanceLog).filter(
             AttendanceLog.user_id == current_user.id
         )
@@ -230,20 +237,22 @@ async def get_my_records(
             try:
                 start = datetime.fromisoformat(start_date)
                 query = query.filter(AttendanceLog.sign_time >= start)
+                logger.info(f"开始日期: {start}")
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="start_date格式错误"
+                    detail="start_date格式错误，请使用 ISO 格式 (YYYY-MM-DDTHH:MM:SS)"
                 )
 
         if end_date:
             try:
                 end = datetime.fromisoformat(end_date)
                 query = query.filter(AttendanceLog.sign_time <= end)
+                logger.info(f"结束日期: {end}")
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="end_date格式错误"
+                    detail="end_date格式错误，请使用 ISO 格式 (YYYY-MM-DDTHH:MM:SS)"
                 )
 
         total = query.count()
@@ -251,6 +260,9 @@ async def get_my_records(
 
         records = query.order_by(AttendanceLog.sign_time.desc()).offset(skip).limit(limit).all()
         logger.info(f"返回记录数: {len(records)}")
+
+        for i, r in enumerate(records[:5]):
+            logger.info(f"  记录 {i + 1}: id={r.id}, user_id={r.user_id}, time={r.sign_time}")
 
         records_data = []
         for r in records:
@@ -265,15 +277,19 @@ async def get_my_records(
             "limit": limit,
             "records": records_data
         }
-        logger.info(f"返回数据: {result}")
+
+        logger.info(f"返回数据: total={result['total']}, records={len(result['records'])}")
+        logger.info(f"========== 查询结束 ==========")
+
         return result
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取签到记录失败: {str(e)}")
+        logger.error(f"❌ 获取签到记录失败: {str(e)}")
         import traceback
         traceback.print_exc()
+        # ⚠️ 暂时不要返回空数据，抛出异常方便排查
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取记录失败: {str(e)}"
@@ -294,11 +310,12 @@ async def get_statistics(
                 detail="days应在1-365之间"
             )
 
-        end_date = datetime.utcnow()
+        # 使用系统本地时间
+        end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
         records = db.query(AttendanceLog).filter(
-            AttendanceLog.user_id == current_user.id,
+            AttendanceLog.user_id == current_user.id,  # ← 用自增主键 ID 查询
             AttendanceLog.sign_time >= start_date,
             AttendanceLog.sign_time <= end_date
         ).all()

@@ -75,6 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUI();
     switchTab('sign');
     if (accessToken) {
+        console.log('🔑 检测到已登录 Token:', accessToken);
         loadRecords(true);
         loadProfileData();
     }
@@ -95,7 +96,10 @@ function switchTab(tab) {
 
     stopCamera();
 
-    if (tab === 'records' && accessToken) loadRecords(true);
+    if (tab === 'records' && accessToken) {
+        console.log('📋 切换到记录页，加载数据...');
+        loadRecords(true);
+    }
     if (tab === 'profile' && accessToken) loadProfileData();
     if (tab === 'login') {
         if (accessToken) switchTab('profile');
@@ -107,6 +111,7 @@ function switchTab(tab) {
 // ============================================================
 function updateUI() {
     const loggedIn = !!accessToken && currentUser;
+    console.log('🔄 更新 UI, loggedIn:', loggedIn);
 
     $('headerUser').style.display = loggedIn ? 'inline' : 'none';
     $('headerLoginBtn').style.display = loggedIn ? 'none' : 'inline-block';
@@ -158,6 +163,8 @@ async function handleLogin(e) {
         });
 
         const data = await resp.json();
+        console.log('📡 登录响应:', data);
+
         if (resp.ok && data.access_token) {
             accessToken = data.access_token;
             currentUser = { user_id: data.user_id, real_name: data.real_name };
@@ -166,8 +173,12 @@ async function handleLogin(e) {
             $('loginForm').reset();
             updateUI();
             showToast(`欢迎回来，${data.real_name}！`, 'success');
-            loadRecords(true);
-            loadProfileData();
+            console.log('✅ 登录成功，准备加载记录...');
+            // 延迟一下确保 UI 更新完成
+            setTimeout(() => {
+                loadRecords(true);
+                loadProfileData();
+            }, 100);
             switchTab('sign');
         } else {
             showToast(data.detail || '登录失败', 'error');
@@ -726,11 +737,11 @@ async function doSign(base64Data) {
     }
 }
 
-// ============================================================
-// 签到记录（需要登录）
-// ============================================================
 async function loadRecords(reset = true) {
-    if (!accessToken) return;
+    if (!accessToken) {
+        console.warn('⚠️ 未登录，无法加载记录');
+        return;
+    }
 
     if (reset) {
         recordsSkip = 0;
@@ -741,26 +752,37 @@ async function loadRecords(reset = true) {
     try {
         const url = `${API_BASE}/attendance/my-records?skip=${recordsSkip}&limit=${RECORDS_LIMIT}`;
         console.log('📡 请求记录 URL:', url);
+        console.log('📡 Token:', accessToken);
 
         const resp = await fetch(url, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
         });
 
         console.log('📡 响应状态:', resp.status);
+        console.log('📡 响应头:', resp.headers);
+
+        // 先获取响应文本
+        const responseText = await resp.text();
+        console.log('📡 原始响应:', responseText);
 
         if (resp.status === 401) {
+            console.warn('⚠️ Token 已过期，自动退出');
             handleLogout();
             return;
         }
 
-        if (!resp.ok) {
-            const errorData = await resp.json().catch(() => ({}));
-            showToast(errorData.detail || '加载记录失败', 'error');
+        // 尝试解析 JSON
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            console.error('❌ JSON 解析失败:', parseError);
+            console.error('❌ 原始响应:', responseText);
+            showToast('服务器返回数据格式错误，请联系管理员', 'error');
             return;
         }
 
-        const data = await resp.json();
-        console.log('📡 返回数据:', data);
+        console.log('📡 解析后的数据:', data);
 
         if (!data || typeof data !== 'object') {
             console.error('❌ 数据格式错误:', data);
@@ -773,9 +795,11 @@ async function loadRecords(reset = true) {
 
         console.log(`📋 记录数: ${records.length}, 总数: ${total}`);
 
+        // 更新显示
         $('recordsCount').textContent = `共 ${total} 条`;
 
         if (total === 0 || records.length === 0) {
+            console.log('📭 没有记录');
             $('recordsList').innerHTML = `
                 <div class="empty-state">
                     <span class="empty-icon">📭</span>
@@ -786,9 +810,12 @@ async function loadRecords(reset = true) {
             return;
         }
 
-        if (reset) $('recordsList').innerHTML = '';
+        if (reset) {
+            $('recordsList').innerHTML = '';
+            console.log('🔄 重置列表');
+        }
 
-        records.forEach(r => {
+        records.forEach((r, index) => {
             const div = document.createElement('div');
             div.className = 'record-item';
             const d = new Date(r.sign_time);
@@ -802,13 +829,17 @@ async function loadRecords(reset = true) {
                 </div>
             `;
             $('recordsList').appendChild(div);
+            console.log(`  ✅ 添加记录 ${index + 1}: ${d.toLocaleString()}`);
         });
 
+        // 处理加载更多
         if (records.length === RECORDS_LIMIT && recordsSkip + RECORDS_LIMIT < total) {
             $('recordsLoadMore').style.display = 'block';
             recordsSkip += RECORDS_LIMIT;
+            console.log(`📌 加载更多，当前 skip=${recordsSkip}`);
         } else {
             $('recordsLoadMore').style.display = 'none';
+            console.log('📌 没有更多记录');
         }
 
     } catch (err) {
