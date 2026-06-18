@@ -8,7 +8,7 @@ import sys
 import os
 
 from config import get_settings
-from routes import users, attendance  # ⚠️ 移除 auth
+from routes import users, attendance
 from utils.database import init_db
 
 settings = get_settings()
@@ -55,6 +55,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ========== API路由（必须放在前端托管之前） ==========
+app.include_router(users.router, prefix="/api/users", tags=["用户"])
+app.include_router(attendance.router, prefix="/api/attendance", tags=["签到"])
+
 # ========== 前端托管 ==========
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
@@ -67,21 +71,15 @@ if os.path.exists(frontend_path):
 
     @app.get("/{full_path:path}")
     async def catch_all(full_path: str):
-        if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi") or full_path.startswith("redoc"):
-            pass
-        else:
-            file_path = os.path.join(frontend_path, full_path)
-            if os.path.exists(file_path) and os.path.isfile(file_path):
-                return FileResponse(file_path)
-            return FileResponse(os.path.join(frontend_path, "index.html"))
+        # API 请求已经在上面处理了，这里只处理前端页面
+        file_path = os.path.join(frontend_path, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(frontend_path, "index.html"))
 else:
     @app.get("/")
     async def root():
         return {"status": "ok", "message": "前端页面未找到"}
-
-# ========== API路由 ==========
-app.include_router(users.router, prefix="/api/users", tags=["用户"])
-app.include_router(attendance.router, prefix="/api/attendance", tags=["签到"])
 
 
 @app.get("/health")

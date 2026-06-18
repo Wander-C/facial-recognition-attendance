@@ -13,6 +13,7 @@ from routes.users import get_current_user
 
 router = APIRouter()
 settings = get_settings()
+print("🔥🔥🔥 attendance.py 文件被加载了 🔥🔥🔥")
 
 
 @router.post("/detect-face")
@@ -122,7 +123,7 @@ async def sign_in(
         # 3. 写入签到记录（存用户自增主键 ID，使用系统本地时间）
         now = datetime.now()
         attendance_log = AttendanceLog(
-            user_id=matched_user.id,  # ← 存自增主键 ID
+            user_id=matched_user.id,
             sign_time=now
         )
         db.add(attendance_log)
@@ -136,7 +137,7 @@ async def sign_in(
         today_end = datetime.combine(today, datetime.max.time())
 
         today_count = db.query(AttendanceLog).filter(
-            AttendanceLog.user_id == matched_user.id,  # ← 用自增主键 ID 查询
+            AttendanceLog.user_id == matched_user.id,
             AttendanceLog.sign_time >= today_start,
             AttendanceLog.sign_time <= today_end
         ).count()
@@ -173,31 +174,37 @@ async def get_today_status(
         db: Session = Depends(get_db)
 ):
     """获取用户今日签到状态"""
+    print("🔥🔥🔥 today-status 被调用了 🔥🔥🔥")
+    from sqlalchemy import text
     try:
-        # 使用系统本地时间
         today = datetime.now().date()
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
 
-        logger.info(f"查询用户 {current_user.id} 今日签到, 范围: {today_start} ~ {today_end}")
+        sql = text("""
+            SELECT id, user_id, sign_time 
+            FROM attendance_logs 
+            WHERE user_id = :user_id 
+            AND sign_time >= :start 
+            AND sign_time <= :end
+            ORDER BY sign_time DESC
+        """)
+        result = db.execute(sql, {
+            "user_id": current_user.id,
+            "start": today_start,
+            "end": today_end
+        })
+        records = result.fetchall()
 
-        # 用用户 ID 查询
-        today_records = db.query(AttendanceLog).filter(
-            AttendanceLog.user_id == current_user.id,  # ← 用自增主键 ID 查询
-            AttendanceLog.sign_time >= today_start,
-            AttendanceLog.sign_time <= today_end
-        ).order_by(AttendanceLog.sign_time.desc()).all()
-
-        today_count = len(today_records)
-        logger.info(f"用户 {current_user.id} 今日签到次数: {today_count}")
+        today_count = len(records)
 
         if today_count > 0:
-            latest = today_records[0]
+            latest = records[0]
             return {
                 "has_signed": True,
-                "sign_time": latest.sign_time.isoformat(),
+                "sign_time": latest[2].isoformat() if latest[2] else None,
                 "today_count": today_count,
-                "message": f"今日已签到 {today_count} 次，最近一次 {latest.sign_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                "message": f"今日已签到 {today_count} 次"
             }
         else:
             return {
@@ -206,11 +213,13 @@ async def get_today_status(
                 "message": "今日尚未签到"
             }
     except Exception as e:
-        logger.error(f"获取今日签到状态失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取状态失败: {str(e)}"
-        )
+        import traceback
+        traceback.print_exc()
+        return {
+            "has_signed": False,
+            "today_count": 0,
+            "message": str(e)
+        }
 
 
 @router.get("/my-records")
@@ -223,77 +232,56 @@ async def get_my_records(
         end_date: Optional[str] = None
 ):
     """获取用户自己的签到记录（需要登录）"""
+    print("🔥🔥🔥 my-records 被调用了 🔥🔥🔥")
+    import traceback
     try:
-        logger.info(f"========== 查询签到记录 ==========")
-        logger.info(f"当前用户: id={current_user.id}, 学号={current_user.user_id}, 姓名={current_user.real_name}")
-        logger.info(f"分页: skip={skip}, limit={limit}")
+        from sqlalchemy import text
 
-        # 用用户 ID 查询
-        query = db.query(AttendanceLog).filter(
-            AttendanceLog.user_id == current_user.id
-        )
+        logger.info("=" * 50)
+        logger.info("查询签到记录")
+        logger.info(f"用户: id={current_user.id}, 学号={current_user.user_id}, 姓名={current_user.real_name}")
 
-        if start_date:
-            try:
-                start = datetime.fromisoformat(start_date)
-                query = query.filter(AttendanceLog.sign_time >= start)
-                logger.info(f"开始日期: {start}")
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="start_date格式错误，请使用 ISO 格式 (YYYY-MM-DDTHH:MM:SS)"
-                )
+        # 直接用原生 SQL 查询
+        sql = text(
+            "SELECT id, user_id, sign_time FROM attendance_logs WHERE user_id = :user_id ORDER BY sign_time DESC LIMIT :limit OFFSET :skip")
+        result = db.execute(sql, {"user_id": current_user.id, "limit": limit, "skip": skip})
+        records = result.fetchall()
 
-        if end_date:
-            try:
-                end = datetime.fromisoformat(end_date)
-                query = query.filter(AttendanceLog.sign_time <= end)
-                logger.info(f"结束日期: {end}")
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="end_date格式错误，请使用 ISO 格式 (YYYY-MM-DDTHH:MM:SS)"
-                )
+        count_sql = text("SELECT COUNT(*) FROM attendance_logs WHERE user_id = :user_id")
+        total = db.execute(count_sql, {"user_id": current_user.id}).scalar() or 0
 
-        total = query.count()
-        logger.info(f"总记录数: {total}")
-
-        records = query.order_by(AttendanceLog.sign_time.desc()).offset(skip).limit(limit).all()
-        logger.info(f"返回记录数: {len(records)}")
-
-        for i, r in enumerate(records[:5]):
-            logger.info(f"  记录 {i + 1}: id={r.id}, user_id={r.user_id}, time={r.sign_time}")
+        logger.info(f"总数: {total}, 记录数: {len(records)}")
 
         records_data = []
         for r in records:
             records_data.append({
-                "id": r.id,
-                "sign_time": r.sign_time.isoformat() if r.sign_time else None
+                "id": r[0],
+                "sign_time": r[2].isoformat() if r[2] else None
             })
+            logger.info(f"  记录: id={r[0]}, user_id={r[1]}, time={r[2]}")
 
-        result = {
+        result_data = {
             "total": total,
             "skip": skip,
             "limit": limit,
             "records": records_data
         }
 
-        logger.info(f"返回数据: total={result['total']}, records={len(result['records'])}")
-        logger.info(f"========== 查询结束 ==========")
+        logger.info(f"返回数据: {result_data}")
+        print(f"🔥 返回数据: {result_data}")
 
-        return result
+        return result_data
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"❌ 获取签到记录失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        # ⚠️ 暂时不要返回空数据，抛出异常方便排查
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取记录失败: {str(e)}"
-        )
+        logger.error(f"❌ 错误: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
+            "total": 0,
+            "skip": skip,
+            "limit": limit,
+            "records": [],
+            "error": str(e)
+        }
 
 
 @router.get("/statistics")
@@ -315,7 +303,7 @@ async def get_statistics(
         start_date = end_date - timedelta(days=days)
 
         records = db.query(AttendanceLog).filter(
-            AttendanceLog.user_id == current_user.id,  # ← 用自增主键 ID 查询
+            AttendanceLog.user_id == current_user.id,
             AttendanceLog.sign_time >= start_date,
             AttendanceLog.sign_time <= end_date
         ).all()
@@ -344,3 +332,10 @@ async def get_statistics(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取统计失败: {str(e)}"
         )
+
+
+@router.get("/ping")
+async def ping():
+    """测试接口是否正常"""
+    print("🏓🏓🏓 ping 被调用了 🏓🏓🏓")
+    return {"status": "pong", "message": "测试成功"}
