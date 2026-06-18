@@ -30,45 +30,29 @@
         <section id="pageSign" class="page active">
             <div class="page-header">
                 <h2>📸 签到</h2>
-                <p class="subtitle">拍照或选择照片，系统将自动识别您的身份</p>
+                <p class="subtitle">点击拍照按钮，系统将自动识别您的身份</p>
             </div>
 
             <div class="card">
-                <!-- 签到方式切换 -->
-                <div class="mode-selector">
-                    <button class="mode-btn active" id="signModeCamera">📷 拍照</button>
-                    <button class="mode-btn" id="signModeAlbum">🖼️ 相册</button>
-                </div>
-
-                <!-- 拍照模式 -->
+                <!-- 拍照模式（移除相册切换） -->
                 <div id="signCameraArea" class="sign-area">
-                    <div class="camera-wrapper">
+                    <div class="camera-wrapper" id="signCameraWrapper">
                         <video id="signVideo" autoplay playsinline></video>
                         <canvas id="signCanvas" style="display:none;"></canvas>
                         <div class="camera-overlay">
                             <div class="face-frame"></div>
                         </div>
+                        <!-- 拍照后的预览 -->
+                        <div id="signPhotoPreview" class="photo-preview" style="display:none;">
+                            <img id="signPreviewImg" style="max-width:100%;max-height:200px;border-radius:8px;">
+                        </div>
                     </div>
                     <div class="camera-controls">
-                        <button class="btn-capture" id="signCaptureBtn" disabled>
+                        <button class="btn-capture" id="signCaptureBtn">
                             <span class="capture-circle"></span>
                         </button>
                     </div>
-                    <button class="btn-outline" id="signStartCameraBtn">📷 开启摄像头</button>
-                </div>
-
-                <!-- 相册模式 -->
-                <div id="signAlbumArea" class="sign-area" style="display:none;">
-                    <div class="upload-area" id="signUploadArea">
-                        <input type="file" id="signFileInput" accept="image/*">
-                        <div class="upload-placeholder">
-                            <span class="upload-icon">🖼️</span>
-                            <p>点击选择照片</p>
-                            <small>支持 JPG、PNG 格式</small>
-                        </div>
-                        <img id="signPreviewImg" style="display:none;">
-                    </div>
-                    <button class="btn-primary" id="signSubmitBtn" disabled>确认签到</button>
+                    <button class="btn-outline" id="signRetakeBtn" style="display:none;">📷 重新拍摄</button>
                 </div>
 
                 <!-- 签到结果 -->
@@ -169,7 +153,7 @@
                 <!-- 更新人脸照片 -->
                 <div class="card">
                     <h3>📷 更新人脸照片</h3>
-                    <p style="font-size:13px;color:#999;margin-bottom:12px;">重新拍摄或选择照片更新你的人脸数据</p>
+                    <p style="font-size:13px;color:#999;margin-bottom:12px;">点击拍照按钮更新你的人脸数据</p>
 
                     <div class="face-collect-area">
                         <div id="profileCameraWrapper" class="camera-wrapper" style="min-height:140px;">
@@ -180,17 +164,14 @@
                             </div>
                         </div>
                         <div id="profilePhotoPreview" class="photo-preview" style="display:none;">
-                            <img id="profilePreviewImg">
+                            <img id="profilePreviewImg" style="max-width:100%;max-height:180px;border-radius:8px;">
                             <div class="preview-status" id="profileDetectStatus">检测中...</div>
                         </div>
                     </div>
 
                     <div class="face-collect-controls">
-                        <button type="button" class="btn-outline-sm" id="profileStartCameraBtn">📷 开启摄像头</button>
-                        <button type="button" class="btn-capture-sm" id="profileCaptureBtn" disabled>拍照</button>
+                        <button type="button" class="btn-capture-sm" id="profileCaptureBtn">📷 拍照</button>
                         <button type="button" class="btn-outline-sm" id="profileRetakeBtn" style="display:none;">重新拍</button>
-                        <button type="button" class="btn-outline-sm" id="profileAlbumBtn">📁 相册</button>
-                        <input type="file" id="profileFileInput" accept="image/*" style="display:none;">
                     </div>
 
                     <button class="btn-primary" id="profileUpdateFaceBtn" disabled style="margin-top:12px;">更新人脸照片</button>
@@ -251,7 +232,7 @@
 
                         <!-- 人脸采集 -->
                         <div class="face-collect">
-                            <label>人脸照片 <span style="color:#999;font-weight:400;">（请正对摄像头）</span></label>
+                            <label>人脸照片 <span style="color:#999;font-weight:400;">（点击拍照按钮）</span></label>
                             <div class="face-collect-area">
                                 <div id="regCameraWrapper" class="camera-wrapper" style="min-height:140px;">
                                     <video id="regVideo" autoplay playsinline></video>
@@ -261,17 +242,14 @@
                                     </div>
                                 </div>
                                 <div id="regPhotoPreview" class="photo-preview" style="display:none;">
-                                    <img id="regPreviewImg">
+                                    <img id="regPreviewImg" style="max-width:100%;max-height:180px;border-radius:8px;">
                                     <div class="preview-status" id="regDetectStatus">检测中...</div>
                                 </div>
                             </div>
 
                             <div class="face-collect-controls">
-                                <button type="button" class="btn-outline-sm" id="regStartCameraBtn">📷 开启摄像头</button>
-                                <button type="button" class="btn-capture-sm" id="regCaptureBtn" disabled>拍照</button>
+                                <button type="button" class="btn-capture-sm" id="regCaptureBtn">📷 拍照</button>
                                 <button type="button" class="btn-outline-sm" id="regRetakeBtn" style="display:none;">重新拍</button>
-                                <button type="button" class="btn-outline-sm" id="regAlbumBtn">📁 相册</button>
-                                <input type="file" id="regFileInput" accept="image/*" style="display:none;">
                             </div>
                         </div>
 

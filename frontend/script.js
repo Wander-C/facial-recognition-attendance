@@ -12,6 +12,9 @@ const RECORDS_LIMIT = 20;
 let capturedImageBase64 = null;
 let isFaceDetected = false;
 
+// 摄像头是否已开启
+let isCameraReady = false;
+
 // ============================================================
 // DOM 引用
 // ============================================================
@@ -50,30 +53,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 注册
     $('registerForm').addEventListener('submit', handleRegister);
-    $('regStartCameraBtn').addEventListener('click', () => startCamera('register'));
-    $('regCaptureBtn').addEventListener('click', () => capturePhoto('register'));
-    $('regRetakeBtn').addEventListener('click', () => retakePhoto('register'));
-    $('regAlbumBtn').addEventListener('click', () => $('regFileInput').click());
-    $('regFileInput').addEventListener('change', (e) => handleFileSelect(e, 'register'));
+    $('regCaptureBtn').addEventListener('click', () => handleCapture('register'));
 
     // 签到
-    $('signStartCameraBtn').addEventListener('click', startSignCamera);
-    $('signCaptureBtn').addEventListener('click', captureSignPhoto);
-    $('signModeCamera').addEventListener('click', () => switchSignMode('camera'));
-    $('signModeAlbum').addEventListener('click', () => switchSignMode('album'));
-    $('signFileInput').addEventListener('change', handleSignFileSelect);
-    $('signSubmitBtn').addEventListener('click', submitSign);
+    $('signCaptureBtn').addEventListener('click', handleSignCapture);
+    $('signRetakeBtn').addEventListener('click', () => retakeSignPhoto());
 
     // 记录
     $('recordsRefreshBtn').addEventListener('click', () => loadRecords(true));
     $('recordsLoadMore').addEventListener('click', () => loadRecords(false));
 
     // 个人中心 - 更新照片
-    $('profileStartCameraBtn').addEventListener('click', () => startCamera('profile'));
-    $('profileCaptureBtn').addEventListener('click', () => capturePhoto('profile'));
+    $('profileCaptureBtn').addEventListener('click', () => handleCapture('profile'));
     $('profileRetakeBtn').addEventListener('click', () => retakePhoto('profile'));
-    $('profileAlbumBtn').addEventListener('click', () => $('profileFileInput').click());
-    $('profileFileInput').addEventListener('change', (e) => handleFileSelect(e, 'profile'));
     $('profileUpdateFaceBtn').addEventListener('click', updateFace);
 
     // 退出
@@ -106,7 +98,6 @@ function switchTab(tab) {
     if (tab === 'records' && accessToken) loadRecords(true);
     if (tab === 'profile' && accessToken) loadProfileData();
     if (tab === 'login') {
-        // 如果已登录，跳转到个人中心
         if (accessToken) switchTab('profile');
     }
 }
@@ -117,31 +108,24 @@ function switchTab(tab) {
 function updateUI() {
     const loggedIn = !!accessToken && currentUser;
 
-    // 顶部导航
     $('headerUser').style.display = loggedIn ? 'inline' : 'none';
     $('headerLoginBtn').style.display = loggedIn ? 'none' : 'inline-block';
     $('headerLogoutBtn').style.display = loggedIn ? 'inline-block' : 'none';
     if (loggedIn) $('headerUserName').textContent = currentUser.real_name || '用户';
 
-    // 底部导航 - 根据登录状态显示/隐藏
     const navProfile = document.getElementById('navProfile');
     const navLogin = document.getElementById('navLogin');
 
     if (loggedIn) {
-        // 已登录：显示"我的"，隐藏"登录"
         navProfile.style.display = 'flex';
         navLogin.style.display = 'none';
     } else {
-        // 未登录：隐藏"我的"，显示"登录"
         navProfile.style.display = 'none';
         navLogin.style.display = 'flex';
     }
 
-    // 个人中心页面
     $('profileNotLoggedIn').style.display = loggedIn ? 'none' : 'block';
     $('profileLoggedIn').style.display = loggedIn ? 'block' : 'none';
-
-    // 记录页
     $('recordsLoginPrompt').style.display = loggedIn ? 'none' : 'block';
     $('recordsContent').style.display = loggedIn ? 'block' : 'none';
 
@@ -252,7 +236,6 @@ async function handleRegister(e) {
             showToast('注册成功！请登录', 'success');
             $('registerForm').reset();
             resetPhotoCapture('register');
-            // 切换到登录
             document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
             document.querySelector('.auth-tab[data-auth="login"]').classList.add('active');
             $('authLogin').style.display = 'block';
@@ -269,37 +252,61 @@ async function handleRegister(e) {
 }
 
 // ============================================================
-// 摄像头通用
+// 摄像头管理（只负责开启，不弹窗）
 // ============================================================
-async function startCamera(type) {
+async function ensureCamera(type) {
     try {
+        // 如果已经开启，直接返回
+        if (isCameraReady && currentStream) {
+            return true;
+        }
+
+        // 停止之前的摄像头
         stopCamera();
+
+        let videoId;
+        if (type === 'register') {
+            videoId = 'regVideo';
+        } else if (type === 'profile') {
+            videoId = 'profileVideo';
+        } else if (type === 'sign') {
+            videoId = 'signVideo';
+        } else {
+            return false;
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
         });
         currentStream = stream;
 
-        let videoId, captureBtnId, startBtnId;
-        if (type === 'register') {
-            videoId = 'regVideo';
-            captureBtnId = 'regCaptureBtn';
-            startBtnId = 'regStartCameraBtn';
-        } else if (type === 'profile') {
-            videoId = 'profileVideo';
-            captureBtnId = 'profileCaptureBtn';
-            startBtnId = 'profileStartCameraBtn';
-        } else {
-            return;
-        }
-
         const video = $(videoId);
         video.srcObject = stream;
         await video.play();
-        $(captureBtnId).disabled = false;
-        $(startBtnId).textContent = '📷 已开启';
-        showToast('摄像头已开启');
+
+        // 显示摄像头，隐藏预览
+        const videoWrapper = video.parentElement;
+        if (videoWrapper) {
+            videoWrapper.style.display = 'block';
+        }
+        if (type === 'register') {
+            $('regPhotoPreview').style.display = 'none';
+        } else if (type === 'profile') {
+            $('profilePhotoPreview').style.display = 'none';
+        } else if (type === 'sign') {
+            $('signPhotoPreview').style.display = 'none';
+            $('signResult').style.display = 'none';
+        }
+
+        isCameraReady = true;
+        return true;
     } catch (err) {
-        showToast('无法访问摄像头: ' + err.message, 'error');
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            showToast('您拒绝了摄像头权限，请在浏览器设置中允许', 'error');
+        } else {
+            showToast('无法访问摄像头: ' + err.message, 'error');
+        }
+        return false;
     }
 }
 
@@ -308,6 +315,7 @@ function stopCamera() {
         currentStream.getTracks().forEach(t => t.stop());
         currentStream = null;
     }
+    isCameraReady = false;
     ['regVideo', 'profileVideo', 'signVideo'].forEach(id => {
         const v = document.getElementById(id);
         if (v) v.srcObject = null;
@@ -315,11 +323,36 @@ function stopCamera() {
 }
 
 // ============================================================
-// 拍照通用
+// 拍照处理（通用）
 // ============================================================
-function capturePhoto(type) {
-    let videoId, canvasId, previewId, statusId, retakeBtnId, submitBtnId, startBtnId, captureBtnId;
-    let isRegister = false;
+async function handleCapture(type) {
+    // 检查摄像头是否已开启
+    if (!isCameraReady || !currentStream) {
+        // 摄像头未开启 → 弹窗确认开启摄像头
+        const confirmOpen = confirm('📷 是否开启摄像头？');
+        if (!confirmOpen) {
+            showToast('已取消', 'info');
+            return;
+        }
+
+        // 开启摄像头（不拍照）
+        const ready = await ensureCamera(type);
+        if (!ready) {
+            return;
+        }
+        showToast('摄像头已开启，请再次点击拍照', 'success');
+        return;
+    }
+
+    // 摄像头已开启 → 直接拍照
+    await takePhoto(type);
+}
+
+// ============================================================
+// 执行拍照
+// ============================================================
+async function takePhoto(type) {
+    let videoId, canvasId, previewId, statusId, retakeBtnId, submitBtnId, captureBtnId;
 
     if (type === 'register') {
         videoId = 'regVideo';
@@ -328,9 +361,7 @@ function capturePhoto(type) {
         statusId = 'regDetectStatus';
         retakeBtnId = 'regRetakeBtn';
         submitBtnId = 'regSubmitBtn';
-        startBtnId = 'regStartCameraBtn';
         captureBtnId = 'regCaptureBtn';
-        isRegister = true;
     } else if (type === 'profile') {
         videoId = 'profileVideo';
         canvasId = 'profileCanvas';
@@ -338,19 +369,18 @@ function capturePhoto(type) {
         statusId = 'profileDetectStatus';
         retakeBtnId = 'profileRetakeBtn';
         submitBtnId = 'profileUpdateFaceBtn';
-        startBtnId = 'profileStartCameraBtn';
         captureBtnId = 'profileCaptureBtn';
-        isRegister = false;
     } else {
         return;
     }
 
     const video = $(videoId);
     if (!video || !video.srcObject) {
-        showToast('请先开启摄像头', 'error');
+        showToast('摄像头未就绪，请重试', 'error');
         return;
     }
 
+    // 拍照
     const canvas = $(canvasId);
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
@@ -360,11 +390,16 @@ function capturePhoto(type) {
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     const base64 = dataUrl.split(',')[1];
 
-    // 显示预览 - 修复：使用正确的元素ID
+    // 显示预览
+    const videoWrapper = video.parentElement;
+    if (videoWrapper) {
+        videoWrapper.style.display = 'none';
+    }
+
     const preview = $(previewId);
     if (preview) {
         preview.style.display = 'block';
-        const previewImg = document.getElementById(previewId + 'Img');
+        const previewImg = preview.querySelector('img');
         if (previewImg) {
             previewImg.src = dataUrl;
         }
@@ -376,49 +411,17 @@ function capturePhoto(type) {
         status.textContent = '⏳ 检测人脸...';
     }
 
-    // 隐藏摄像头
-    const videoWrapper = $(videoId)?.parentElement;
-    if (videoWrapper) {
-        videoWrapper.style.display = 'none';
-    }
-
-    const captureBtn = $(captureBtnId);
-    if (captureBtn) captureBtn.disabled = true;
-
-    const startBtn = $(startBtnId);
-    if (startBtn) startBtn.textContent = '📷 重新开启';
+    $(captureBtnId).disabled = true;
+    $(retakeBtnId).style.display = 'inline-block';
+    $(submitBtnId).disabled = true;
 
     // 检测人脸
-    detectFace(base64, type);
+    await detectFace(base64, type);
 }
 
-function handleFileSelect(e, type) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(ev) {
-        const base64 = ev.target.result.split(',')[1];
-        // 显示预览
-        let previewId, statusId;
-        if (type === 'register') {
-            previewId = 'regPhotoPreview';
-            statusId = 'regDetectStatus';
-        } else if (type === 'profile') {
-            previewId = 'profilePhotoPreview';
-            statusId = 'profileDetectStatus';
-        }
-        const preview = $(previewId);
-        preview.style.display = 'block';
-        $(previewId + 'Img').src = ev.target.result;
-        const status = $(statusId);
-        status.className = 'preview-status loading';
-        status.textContent = '⏳ 检测人脸...';
-        detectFace(base64, type);
-    };
-    reader.readAsDataURL(file);
-}
-
+// ============================================================
+// 人脸检测
+// ============================================================
 async function detectFace(base64Data, type) {
     capturedImageBase64 = base64Data;
     isFaceDetected = false;
@@ -441,6 +444,8 @@ async function detectFace(base64Data, type) {
             statusId = 'profileDetectStatus';
             submitBtnId = 'profileUpdateFaceBtn';
             retakeBtnId = 'profileRetakeBtn';
+        } else {
+            return;
         }
 
         const status = $(statusId);
@@ -468,55 +473,72 @@ async function detectFace(base64Data, type) {
     }
 }
 
+// ============================================================
+// 重新拍摄（通用）
+// ============================================================
 function retakePhoto(type) {
     capturedImageBase64 = null;
     isFaceDetected = false;
 
-    let videoId, previewId, retakeBtnId, submitBtnId, captureBtnId, startBtnId;
+    let videoId, previewId, retakeBtnId, submitBtnId, captureBtnId;
     if (type === 'register') {
         videoId = 'regVideo';
         previewId = 'regPhotoPreview';
         retakeBtnId = 'regRetakeBtn';
         submitBtnId = 'regSubmitBtn';
         captureBtnId = 'regCaptureBtn';
-        startBtnId = 'regStartCameraBtn';
     } else if (type === 'profile') {
         videoId = 'profileVideo';
         previewId = 'profilePhotoPreview';
         retakeBtnId = 'profileRetakeBtn';
         submitBtnId = 'profileUpdateFaceBtn';
         captureBtnId = 'profileCaptureBtn';
-        startBtnId = 'profileStartCameraBtn';
+    } else {
+        return;
     }
 
     $(previewId).style.display = 'none';
-    $(videoId).parentElement.style.display = 'block';
+    const videoWrapper = $(videoId)?.parentElement;
+    if (videoWrapper) {
+        videoWrapper.style.display = 'block';
+    }
     $(retakeBtnId).style.display = 'none';
     $(submitBtnId).disabled = true;
     $(captureBtnId).disabled = false;
-    $(startBtnId).textContent = '📷 开启摄像头';
-    startCamera(type);
+
+    // 重新开启摄像头
+    isCameraReady = false;
+    ensureCamera(type);
 }
 
 function resetPhotoCapture(type) {
     capturedImageBase64 = null;
     isFaceDetected = false;
-    let previewId, retakeBtnId, submitBtnId, videoId;
+    let previewId, retakeBtnId, submitBtnId, videoId, captureBtnId;
     if (type === 'register') {
         previewId = 'regPhotoPreview';
         retakeBtnId = 'regRetakeBtn';
         submitBtnId = 'regSubmitBtn';
         videoId = 'regVideo';
+        captureBtnId = 'regCaptureBtn';
     } else if (type === 'profile') {
         previewId = 'profilePhotoPreview';
         retakeBtnId = 'profileRetakeBtn';
         submitBtnId = 'profileUpdateFaceBtn';
         videoId = 'profileVideo';
+        captureBtnId = 'profileCaptureBtn';
+    } else {
+        return;
     }
     $(previewId).style.display = 'none';
     $(retakeBtnId).style.display = 'none';
     $(submitBtnId).disabled = true;
-    $(videoId).parentElement.style.display = 'block';
+    $(captureBtnId).disabled = false;
+    const videoWrapper = $(videoId)?.parentElement;
+    if (videoWrapper) {
+        videoWrapper.style.display = 'block';
+    }
+    isCameraReady = false;
     stopCamera();
 }
 
@@ -563,50 +585,36 @@ async function updateFace() {
 // ============================================================
 // 签到（不需要登录）
 // ============================================================
-function switchSignMode(mode) {
-    const cameraArea = $('signCameraArea');
-    const albumArea = $('signAlbumArea');
-    const cameraBtn = $('signModeCamera');
-    const albumBtn = $('signModeAlbum');
+async function handleSignCapture() {
+    // 检查摄像头是否已开启
+    if (!isCameraReady || !currentStream) {
+        // 摄像头未开启 → 弹窗确认开启摄像头
+        const confirmOpen = confirm('📷 是否开启摄像头？');
+        if (!confirmOpen) {
+            showToast('已取消', 'info');
+            return;
+        }
 
-    if (mode === 'camera') {
-        cameraArea.style.display = 'block';
-        albumArea.style.display = 'none';
-        cameraBtn.classList.add('active');
-        albumBtn.classList.remove('active');
-        stopCamera();
-    } else {
-        cameraArea.style.display = 'none';
-        albumArea.style.display = 'block';
-        cameraBtn.classList.remove('active');
-        albumBtn.classList.add('active');
-        stopCamera();
+        // 开启摄像头（不拍照）
+        const ready = await ensureCamera('sign');
+        if (!ready) {
+            return;
+        }
+        showToast('摄像头已开启，请再次点击拍照', 'success');
+        return;
     }
-    $('signResult').style.display = 'none';
+
+    // 摄像头已开启 → 直接拍照
+    await takeSignPhoto();
 }
 
-async function startSignCamera() {
-    try {
-        stopCamera();
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
-        });
-        currentStream = stream;
-        const video = $('signVideo');
-        video.srcObject = stream;
-        await video.play();
-        $('signCaptureBtn').disabled = false;
-        $('signStartCameraBtn').textContent = '📷 已开启';
-        showToast('摄像头已开启');
-    } catch (err) {
-        showToast('无法访问摄像头: ' + err.message, 'error');
-    }
-}
-
-async function captureSignPhoto() {
+// ============================================================
+// 执行签到拍照
+// ============================================================
+async function takeSignPhoto() {
     const video = $('signVideo');
-    if (!video.srcObject) {
-        showToast('请先开启摄像头', 'error');
+    if (!video || !video.srcObject) {
+        showToast('摄像头未就绪，请重试', 'error');
         return;
     }
 
@@ -619,42 +627,44 @@ async function captureSignPhoto() {
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     const base64 = dataUrl.split(',')[1];
 
+    // 显示预览
+    const videoWrapper = video.parentElement;
+    if (videoWrapper) {
+        videoWrapper.style.display = 'none';
+    }
+    const preview = $('signPhotoPreview');
+    if (preview) {
+        preview.style.display = 'block';
+        const previewImg = preview.querySelector('img');
+        if (previewImg) {
+            previewImg.src = dataUrl;
+        }
+    }
+
+    $('signRetakeBtn').style.display = 'inline-block';
+    $('signCaptureBtn').disabled = true;
+
+    // 执行签到
     await doSign(base64);
 }
 
-function handleSignFileSelect(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+function retakeSignPhoto() {
+    capturedImageBase64 = null;
+    isFaceDetected = false;
 
-    const reader = new FileReader();
-    reader.onload = function(ev) {
-        const img = $('signPreviewImg');
-        img.src = ev.target.result;
-        img.style.display = 'block';
-        $('signUploadArea').querySelector('.upload-placeholder').style.display = 'none';
-        $('signSubmitBtn').disabled = false;
-    };
-    reader.readAsDataURL(file);
+    $('signPhotoPreview').style.display = 'none';
+    $('signResult').style.display = 'none';
+    const videoWrapper = $('signVideo')?.parentElement;
+    if (videoWrapper) {
+        videoWrapper.style.display = 'block';
+    }
+    $('signRetakeBtn').style.display = 'none';
+    $('signCaptureBtn').disabled = false;
+
+    isCameraReady = false;
+    ensureCamera('sign');
 }
 
-async function submitSign() {
-    const file = $('signFileInput').files[0];
-    if (!file) {
-        showToast('请选择照片', 'error');
-        return;
-    }
-
-    try {
-        const base64 = await fileToBase64(file);
-        await doSign(base64.split(',')[1]);
-    } catch (err) {
-        showToast('读取照片失败: ' + err.message, 'error');
-    }
-}
-
-// ============================================================
-// 签到核心逻辑（每次签到都写入数据库）
-// ============================================================
 async function doSign(base64Data) {
     showLoading('签到中...');
 
@@ -670,7 +680,6 @@ async function doSign(base64Data) {
         resultDiv.style.display = 'block';
 
         if (resp.ok && data.success) {
-            // 格式化签到时间
             const signTime = new Date(data.sign_time);
             const timeStr = signTime.toLocaleString('zh-CN', {
                 year: 'numeric',
@@ -681,7 +690,6 @@ async function doSign(base64Data) {
                 second: '2-digit'
             });
 
-            // 显示签到结果 - 格式: "学号 用户名 已在 时间 签到"
             resultDiv.className = 'sign-result success';
             resultDiv.innerHTML = `
                 <span class="result-icon">✅</span>
@@ -693,22 +701,15 @@ async function doSign(base64Data) {
                 </div>
             `;
 
-            // Toast 提示
             const toastMsg = `${data.user_id} ${data.user_name} 已在 ${signTime.toLocaleTimeString('zh-CN')} 签到`;
             showToast(toastMsg, 'success');
 
-            // 刷新记录
             if (accessToken) {
                 loadRecords(true);
                 loadProfileData();
             }
 
-            // 重置
-            $('signFileInput').value = '';
-            $('signPreviewImg').style.display = 'none';
-            $('signUploadArea').querySelector('.upload-placeholder').style.display = 'block';
-            $('signSubmitBtn').disabled = true;
-            stopCamera();
+            $('signCaptureBtn').disabled = false;
         } else {
             resultDiv.className = 'sign-result error';
             resultDiv.innerHTML = `
@@ -816,10 +817,6 @@ async function loadRecords(reset = true) {
     }
 }
 
-function loadMoreRecords() {
-    loadRecords(false);
-}
-
 // ============================================================
 // 个人中心数据
 // ============================================================
@@ -827,7 +824,6 @@ async function loadProfileData() {
     if (!accessToken) return;
 
     try {
-        // 今日签到状态
         const resp1 = await fetch(`${API_BASE}/attendance/today-status`, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
         });
@@ -846,7 +842,6 @@ async function loadProfileData() {
             }
         }
 
-        // 总签到数
         const resp2 = await fetch(`${API_BASE}/attendance/my-records?limit=1`, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
         });
@@ -857,7 +852,6 @@ async function loadProfileData() {
             }
         }
 
-        // 是否有照片
         const resp3 = await fetch(`${API_BASE}/users/has-face`, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
         });
