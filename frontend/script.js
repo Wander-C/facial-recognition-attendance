@@ -117,12 +117,27 @@ function switchTab(tab) {
 function updateUI() {
     const loggedIn = !!accessToken && currentUser;
 
+    // 顶部导航
     $('headerUser').style.display = loggedIn ? 'inline' : 'none';
     $('headerLoginBtn').style.display = loggedIn ? 'none' : 'inline-block';
     $('headerLogoutBtn').style.display = loggedIn ? 'inline-block' : 'none';
     if (loggedIn) $('headerUserName').textContent = currentUser.real_name || '用户';
 
-    // 个人中心
+    // 底部导航 - 根据登录状态显示/隐藏
+    const navProfile = document.getElementById('navProfile');
+    const navLogin = document.getElementById('navLogin');
+
+    if (loggedIn) {
+        // 已登录：显示"我的"，隐藏"登录"
+        navProfile.style.display = 'flex';
+        navLogin.style.display = 'none';
+    } else {
+        // 未登录：隐藏"我的"，显示"登录"
+        navProfile.style.display = 'none';
+        navLogin.style.display = 'flex';
+    }
+
+    // 个人中心页面
     $('profileNotLoggedIn').style.display = loggedIn ? 'none' : 'block';
     $('profileLoggedIn').style.display = loggedIn ? 'block' : 'none';
 
@@ -152,7 +167,6 @@ async function handleLogin(e) {
     showLoading('登录中...');
 
     try {
-        // ⚠️ 修改：将 /auth/login 改为 /users/login
         const resp = await fetch(`${API_BASE}/users/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -222,7 +236,6 @@ async function handleRegister(e) {
     showLoading('注册中...');
 
     try {
-        // ⚠️ 修改：将 /auth/register 改为 /users/register
         const resp = await fetch(`${API_BASE}/users/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -624,6 +637,9 @@ async function submitSign() {
     }
 }
 
+// ============================================================
+// 签到核心逻辑（每次签到都写入数据库）
+// ============================================================
 async function doSign(base64Data) {
     showLoading('签到中...');
 
@@ -639,38 +655,39 @@ async function doSign(base64Data) {
         resultDiv.style.display = 'block';
 
         if (resp.ok && data.success) {
-            if (data.already_signed) {
-                // 已签到，显示提示但不记录
-                resultDiv.className = 'sign-result warning';
-                resultDiv.innerHTML = `
-                    <span class="result-icon">⚠️</span>
-                    <strong>已签到</strong>
-                    <div class="result-detail">
-                        👤 ${data.user_name}<br>
-                        🕐 已在 ${new Date(data.sign_time).toLocaleString()} 签过到<br>
-                        📊 相似度：${(data.similarity * 100).toFixed(1)}%
-                    </div>
-                `;
-                showToast(`已在 ${new Date(data.sign_time).toLocaleTimeString()} 签过到`, 'info');
-            } else {
-                // 新签到
-                resultDiv.className = 'sign-result success';
-                resultDiv.innerHTML = `
-                    <span class="result-icon">✅</span>
-                    <strong>签到成功！</strong>
-                    <div class="result-detail">
-                        👤 ${data.user_name}<br>
-                        🕐 ${new Date(data.sign_time).toLocaleString()}<br>
-                        📊 相似度：${(data.similarity * 100).toFixed(1)}%
-                    </div>
-                `;
-                showToast(`签到成功！欢迎 ${data.user_name}`, 'success');
-                // 刷新记录
-                if (accessToken) {
-                    loadRecords(true);
-                    loadProfileData();
-                }
+            // 格式化签到时间
+            const signTime = new Date(data.sign_time);
+            const timeStr = signTime.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+
+            // 显示签到结果 - 格式: "学号 用户名 已在 时间 签到"
+            resultDiv.className = 'sign-result success';
+            resultDiv.innerHTML = `
+                <span class="result-icon">✅</span>
+                <strong>签到成功</strong>
+                <div class="result-detail">
+                    📋 ${data.user_id} ${data.user_name}<br>
+                    🕐 已在 ${timeStr} 签到<br>
+                    📊 今日第 ${data.today_count} 次签到
+                </div>
+            `;
+
+            // Toast 提示
+            const toastMsg = `${data.user_id} ${data.user_name} 已在 ${signTime.toLocaleTimeString('zh-CN')} 签到`;
+            showToast(toastMsg, 'success');
+
+            // 刷新记录
+            if (accessToken) {
+                loadRecords(true);
+                loadProfileData();
             }
+
             // 重置
             $('signFileInput').value = '';
             $('signPreviewImg').style.display = 'none';
@@ -706,17 +723,20 @@ async function loadRecords(reset = true) {
     }
 
     try {
-        const resp = await fetch(
-            `${API_BASE}/attendance/my-records?skip=${recordsSkip}&limit=${RECORDS_LIMIT}`,
-            { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
+        const url = `${API_BASE}/attendance/my-records?skip=${recordsSkip}&limit=${RECORDS_LIMIT}`;
+        console.log('📡 请求记录 URL:', url);
+
+        const resp = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        console.log('📡 响应状态:', resp.status);
 
         if (resp.status === 401) {
             handleLogout();
             return;
         }
 
-        // ⚠️ 添加响应检查
         if (!resp.ok) {
             const errorData = await resp.json().catch(() => ({}));
             showToast(errorData.detail || '加载记录失败', 'error');
@@ -724,32 +744,37 @@ async function loadRecords(reset = true) {
         }
 
         const data = await resp.json();
+        console.log('📡 返回数据:', data);
 
-        // ⚠️ 检查 data 是否有效
         if (!data || typeof data !== 'object') {
+            console.error('❌ 数据格式错误:', data);
             showToast('加载记录失败：数据格式错误', 'error');
             return;
         }
 
-        $('recordsCount').textContent = `共 ${data.total || 0} 条`;
+        const records = Array.isArray(data.records) ? data.records : [];
+        const total = typeof data.total === 'number' ? data.total : 0;
 
-        if (data.total === 0 || !data.records || data.records.length === 0) {
+        console.log(`📋 记录数: ${records.length}, 总数: ${total}`);
+
+        $('recordsCount').textContent = `共 ${total} 条`;
+
+        if (total === 0 || records.length === 0) {
             $('recordsList').innerHTML = `
                 <div class="empty-state">
                     <span class="empty-icon">📭</span>
                     <p>还没有签到记录，去签到吧！</p>
                 </div>
             `;
+            $('recordsLoadMore').style.display = 'none';
             return;
         }
 
         if (reset) $('recordsList').innerHTML = '';
 
-        data.records.forEach(r => {
+        records.forEach(r => {
             const div = document.createElement('div');
             div.className = 'record-item';
-            const similarity = (r.similarity * 100).toFixed(1);
-            const simClass = r.similarity > 0.85 ? 'high' : 'low';
             const d = new Date(r.sign_time);
             div.innerHTML = `
                 <div class="record-left">
@@ -757,14 +782,13 @@ async function loadRecords(reset = true) {
                     <span class="record-time">${d.toLocaleTimeString()}</span>
                 </div>
                 <div class="record-right">
-                    <div class="record-similarity ${simClass}">${similarity}%</div>
-                    <div style="font-size:10px;color:#ccc;">${r.ip_address || '未知IP'}</div>
+                    <span style="font-size:12px;color:#4a6cf7;">✅ 已签到</span>
                 </div>
             `;
             $('recordsList').appendChild(div);
         });
 
-        if (data.records.length === RECORDS_LIMIT && recordsSkip + RECORDS_LIMIT < data.total) {
+        if (records.length === RECORDS_LIMIT && recordsSkip + RECORDS_LIMIT < total) {
             $('recordsLoadMore').style.display = 'block';
             recordsSkip += RECORDS_LIMIT;
         } else {
@@ -772,7 +796,7 @@ async function loadRecords(reset = true) {
         }
 
     } catch (err) {
-        console.error('加载记录失败', err);
+        console.error('❌ 加载记录失败:', err);
         showToast('加载记录失败: ' + err.message, 'error');
     }
 }
@@ -796,7 +820,9 @@ async function loadProfileData() {
             const data = await resp1.json();
             if (data && data.has_signed !== undefined) {
                 if (data.has_signed) {
-                    $('profileTodayStatus').textContent = `✅ 已签到 (${new Date(data.sign_time).toLocaleTimeString()})`;
+                    const count = data.today_count || 1;
+                    const time = data.sign_time ? new Date(data.sign_time).toLocaleTimeString() : '';
+                    $('profileTodayStatus').textContent = `✅ 已签到 ${count} 次 (最近 ${time})`;
                     $('profileTodayStatus').style.color = '#2e7d32';
                 } else {
                     $('profileTodayStatus').textContent = '❌ 未签到';

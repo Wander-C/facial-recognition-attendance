@@ -58,9 +58,11 @@ async def sign_in(
 ):
     """
     用户签到（不需要登录）
-    通过人脸比对从照片库中检索用户
+    每次签到都写入数据库，同时返回今日已签到次数
     """
     try:
+        logger.info("========== 开始签到 ==========")
+
         sign_image_base64 = request.get("image_base64")
         if not sign_image_base64:
             raise HTTPException(
@@ -115,59 +117,48 @@ async def sign_in(
                 detail=f"人脸验证不通过，最高相似度: {best_similarity:.2%}，需大于 {threshold:.0%}"
             )
 
-        # 3. 检查今日是否已签到
+        logger.info(f"✅ 匹配到用户: {matched_user.user_id} ({matched_user.real_name})")
+
+        # 3. ⚠️ 先写入签到记录（每次都写入）
+        now = datetime.utcnow()
+        attendance_log = AttendanceLog(
+            user_id=matched_user.id,
+            sign_time=now
+        )
+        db.add(attendance_log)
+        db.commit()
+
+        logger.info(f"✅ 签到记录已写入数据库，ID: {attendance_log.id}")
+
+        # 4. 查询今日已签到次数
         today = date.today()
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
 
-        existing_sign = db.query(AttendanceLog).filter(
+        today_count = db.query(AttendanceLog).filter(
             AttendanceLog.user_id == matched_user.id,
             AttendanceLog.sign_time >= today_start,
             AttendanceLog.sign_time <= today_end
-        ).first()
+        ).count()
 
-        # 4. 如果已签到，返回提示
-        if existing_sign:
-            return {
-                "success": True,
-                "already_signed": True,
-                "message": f"已在 {existing_sign.sign_time.strftime('%Y-%m-%d %H:%M:%S')} 签过到",
-                "user_id": matched_user.user_id,
-                "user_name": matched_user.real_name,
-                "sign_time": existing_sign.sign_time.isoformat(),
-                "similarity": float(existing_sign.similarity)
-            }
+        logger.info(f"📊 用户 {matched_user.user_id} 今日已签到 {today_count} 次")
 
-        # 5. 记录签到
-        client_ip = req.client.host if req else None
-
-        attendance_log = AttendanceLog(
-            user_id=matched_user.id,
-            sign_time=datetime.utcnow(),
-            similarity=best_similarity,
-            sign_image_url=None,
-            ip_address=client_ip
-        )
-        db.add(attendance_log)
-        db.commit()
-        db.refresh(attendance_log)
-
-        logger.info(f"用户 {matched_user.user_id} ({matched_user.real_name}) 签到成功，相似度: {best_similarity:.4f}")
-
+        # 5. 返回结果
         return {
             "success": True,
-            "already_signed": False,
-            "message": "签到成功",
+            "already_signed": today_count > 1,  # 如果大于1次，说明之前签过
+            "message": f"签到成功！今日第 {today_count} 次签到",
             "user_id": matched_user.user_id,
             "user_name": matched_user.real_name,
             "sign_time": attendance_log.sign_time.isoformat(),
-            "similarity": best_similarity,
+            "today_count": today_count,
             "log_id": attendance_log.id
         }
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"签到失败: {str(e)}")
+        logger.error(f"❌ 签到失败: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
@@ -178,8 +169,8 @@ async def sign_in(
 
 @router.get("/today-status")
 async def get_today_status(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """获取用户今日签到状态"""
     try:
@@ -187,22 +178,27 @@ async def get_today_status(
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
 
-        existing_sign = db.query(AttendanceLog).filter(
+        # 获取今日所有签到记录
+        today_records = db.query(AttendanceLog).filter(
             AttendanceLog.user_id == current_user.id,
             AttendanceLog.sign_time >= today_start,
             AttendanceLog.sign_time <= today_end
-        ).first()
+        ).order_by(AttendanceLog.sign_time.desc()).all()
 
-        if existing_sign:
+        today_count = len(today_records)
+
+        if today_count > 0:
+            latest = today_records[0]
             return {
                 "has_signed": True,
-                "sign_time": existing_sign.sign_time.isoformat(),
-                "similarity": float(existing_sign.similarity),
-                "message": f"已在 {existing_sign.sign_time.strftime('%Y-%m-%d %H:%M:%S')} 签到"
+                "sign_time": latest.sign_time.isoformat(),
+                "today_count": today_count,
+                "message": f"今日已签到 {today_count} 次，最近一次 {latest.sign_time.strftime('%Y-%m-%d %H:%M:%S')}"
             }
         else:
             return {
                 "has_signed": False,
+                "today_count": 0,
                 "message": "今日尚未签到"
             }
     except Exception as e:
@@ -215,15 +211,17 @@ async def get_today_status(
 
 @router.get("/my-records")
 async def get_my_records(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    skip: int = 0,
-    limit: int = 50,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+        skip: int = 0,
+        limit: int = 50,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
 ):
-    """获取用户自己的签到记录"""
+    """获取用户自己的签到记录（需要登录）"""
     try:
+        logger.info(f"获取用户 {current_user.id} 的签到记录, skip={skip}, limit={limit}")
+
         query = db.query(AttendanceLog).filter(
             AttendanceLog.user_id == current_user.id
         )
@@ -249,26 +247,33 @@ async def get_my_records(
                 )
 
         total = query.count()
-        records = query.order_by(AttendanceLog.sign_time.desc()).offset(skip).limit(limit).all()
+        logger.info(f"总记录数: {total}")
 
-        return {
+        records = query.order_by(AttendanceLog.sign_time.desc()).offset(skip).limit(limit).all()
+        logger.info(f"返回记录数: {len(records)}")
+
+        records_data = []
+        for r in records:
+            records_data.append({
+                "id": r.id,
+                "sign_time": r.sign_time.isoformat() if r.sign_time else None
+            })
+
+        result = {
             "total": total,
             "skip": skip,
             "limit": limit,
-            "records": [
-                {
-                    "id": r.id,
-                    "sign_time": r.sign_time.isoformat(),
-                    "similarity": float(r.similarity),
-                    "ip_address": r.ip_address
-                }
-                for r in records
-            ]
+            "records": records_data
         }
+        logger.info(f"返回数据: {result}")
+        return result
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"获取签到记录失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取记录失败: {str(e)}"
@@ -277,9 +282,9 @@ async def get_my_records(
 
 @router.get("/statistics")
 async def get_statistics(
-    days: int = 7,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        days: int = 7,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """获取签到统计信息"""
     try:
@@ -299,10 +304,6 @@ async def get_statistics(
         ).all()
 
         total_sign_ins = len(records)
-        avg_similarity = (
-            sum(float(log.similarity) for log in records) / len(records)
-            if records else 0
-        )
 
         daily_stats = {}
         for log in records:
@@ -310,14 +311,12 @@ async def get_statistics(
             if date_key not in daily_stats:
                 daily_stats[date_key] = []
             daily_stats[date_key].append({
-                "sign_time": log.sign_time.isoformat(),
-                "similarity": float(log.similarity)
+                "sign_time": log.sign_time.isoformat()
             })
 
         return {
             "period": f"最近{days}天",
             "total_sign_ins": total_sign_ins,
-            "avg_similarity": round(avg_similarity, 4),
             "daily_stats": daily_stats
         }
     except HTTPException:

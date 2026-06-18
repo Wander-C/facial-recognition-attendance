@@ -57,7 +57,7 @@ def create_database():
 
 
 def migrate_database():
-    """执行数据库迁移"""
+    """执行数据库迁移 - 已删除 role 字段相关逻辑"""
     settings = get_settings()
     engine = create_engine(settings.DATABASE_URL, echo=False)
 
@@ -74,24 +74,20 @@ def migrate_database():
                 logger.info("users 表不存在，将由 init_db 创建")
                 return True
 
-            # 检查 role 字段是否存在
+            # ⚠️ 删除 role 字段（如果存在）
             result = conn.execute(
                 text(
                     "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'")
             )
             column_exists = result.fetchone()
 
-            if not column_exists:
-                logger.info("正在添加 role 字段...")
-                # 添加 role 字段，默认为 'user'
-                conn.execute(
-                    text(
-                        "ALTER TABLE users ADD COLUMN role ENUM('user', 'admin') NOT NULL DEFAULT 'user' COMMENT '用户角色' AFTER face_image_base64")
-                )
+            if column_exists:
+                logger.info("正在删除 role 字段...")
+                conn.execute(text("ALTER TABLE users DROP COLUMN role"))
                 conn.commit()
-                logger.info("✅ role 字段添加成功")
+                logger.info("✅ role 字段已删除")
             else:
-                logger.info("role 字段已存在，跳过迁移")
+                logger.info("role 字段不存在，跳过")
 
             return True
 
@@ -110,7 +106,7 @@ if __name__ == "__main__":
         logger.error("数据库创建失败，请检查配置")
         sys.exit(1)
 
-    # 执行数据库迁移（添加role字段）
+    # 执行数据库迁移（删除 role 字段）
     if not migrate_database():
         logger.error("数据库迁移失败")
         sys.exit(1)
