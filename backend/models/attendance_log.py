@@ -11,7 +11,8 @@ class AttendanceLog(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True, comment="用户ID")
     sign_time = Column(DateTime, default=datetime.utcnow, nullable=False, index=True, comment="签到时间")
     similarity = Column(Numeric(5, 4), nullable=False, comment="人脸匹配相似度")
-    sign_image_url = Column(String(255), nullable=False, comment="签到图片URL")
+    # 修改这里：允许为 NULL，并提供默认值
+    sign_image_url = Column(String(255), nullable=True, default=None, comment="签到图片URL")
     ip_address = Column(String(45), nullable=True, comment="签到IP地址")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="记录创建时间")
 
