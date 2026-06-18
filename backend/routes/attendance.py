@@ -56,10 +56,7 @@ async def sign_in(
         req: Request = None,
         db: Session = Depends(get_db)
 ):
-    """
-    用户签到（不需要登录）
-    通过人脸比对从照片库中检索用户
-    """
+    """用户签到（不需要登录）"""
     try:
         sign_image_base64 = request.get("image_base64")
         if not sign_image_base64:
@@ -74,7 +71,7 @@ async def sign_in(
                 detail="人脸识别服务未就绪"
             )
 
-        # 1. 获取所有已注册人脸的用户
+        # 获取所有已注册人脸的用户
         users_with_face = db.query(User).filter(
             User.face_image_base64.isnot(None)
         ).all()
@@ -85,7 +82,7 @@ async def sign_in(
                 detail="系统中没有已注册人脸的用户，请先注册"
             )
 
-        # 2. 遍历比对
+        # 遍历比对
         matched_user = None
         best_similarity = 0.0
         threshold = settings.FRS_SIMILARITY_THRESHOLD
@@ -115,7 +112,7 @@ async def sign_in(
                 detail=f"人脸验证不通过，最高相似度: {best_similarity:.2%}，需大于 {threshold:.0%}"
             )
 
-        # 3. 检查今日是否已签到
+        # 检查今日是否已签到
         today = date.today()
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
@@ -126,7 +123,6 @@ async def sign_in(
             AttendanceLog.sign_time <= today_end
         ).first()
 
-        # 4. 如果已签到，返回提示
         if existing_sign:
             return {
                 "success": True,
@@ -138,7 +134,7 @@ async def sign_in(
                 "similarity": float(existing_sign.similarity)
             }
 
-        # 5. 记录签到
+        # 记录签到
         client_ip = req.client.host if req else None
 
         attendance_log = AttendanceLog(
@@ -178,8 +174,8 @@ async def sign_in(
 
 @router.get("/today-status")
 async def get_today_status(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """获取用户今日签到状态"""
     try:
@@ -215,15 +211,17 @@ async def get_today_status(
 
 @router.get("/my-records")
 async def get_my_records(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    skip: int = 0,
-    limit: int = 50,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+        skip: int = 0,
+        limit: int = 50,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
 ):
-    """获取用户自己的签到记录"""
+    """获取用户自己的签到记录（需要登录）"""
     try:
+        logger.info(f"获取用户 {current_user.id} 的签到记录, skip={skip}, limit={limit}")
+
         query = db.query(AttendanceLog).filter(
             AttendanceLog.user_id == current_user.id
         )
@@ -249,26 +247,36 @@ async def get_my_records(
                 )
 
         total = query.count()
-        records = query.order_by(AttendanceLog.sign_time.desc()).offset(skip).limit(limit).all()
+        logger.info(f"总记录数: {total}")
 
-        return {
+        records = query.order_by(AttendanceLog.sign_time.desc()).offset(skip).limit(limit).all()
+        logger.info(f"返回记录数: {len(records)}")
+
+        # 构建返回数据
+        records_data = []
+        for r in records:
+            records_data.append({
+                "id": r.id,
+                "sign_time": r.sign_time.isoformat() if r.sign_time else None,
+                "similarity": float(r.similarity) if r.similarity else 0.0,
+                "ip_address": r.ip_address
+            })
+
+        result = {
             "total": total,
             "skip": skip,
             "limit": limit,
-            "records": [
-                {
-                    "id": r.id,
-                    "sign_time": r.sign_time.isoformat(),
-                    "similarity": float(r.similarity),
-                    "ip_address": r.ip_address
-                }
-                for r in records
-            ]
+            "records": records_data
         }
+        logger.info(f"返回数据: {result}")
+        return result
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"获取签到记录失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取记录失败: {str(e)}"
@@ -277,9 +285,9 @@ async def get_my_records(
 
 @router.get("/statistics")
 async def get_statistics(
-    days: int = 7,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        days: int = 7,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """获取签到统计信息"""
     try:
