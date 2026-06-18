@@ -346,7 +346,7 @@ function capturePhoto(type) {
     }
 
     const video = $(videoId);
-    if (!video.srcObject) {
+    if (!video || !video.srcObject) {
         showToast('请先开启摄像头', 'error');
         return;
     }
@@ -360,18 +360,33 @@ function capturePhoto(type) {
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     const base64 = dataUrl.split(',')[1];
 
-    // 显示预览
+    // 显示预览 - 修复：使用正确的元素ID
     const preview = $(previewId);
-    preview.style.display = 'block';
-    $(previewId + 'Img').src = dataUrl;
+    if (preview) {
+        preview.style.display = 'block';
+        const previewImg = document.getElementById(previewId + 'Img');
+        if (previewImg) {
+            previewImg.src = dataUrl;
+        }
+    }
+
     const status = $(statusId);
-    status.className = 'preview-status loading';
-    status.textContent = '⏳ 检测人脸...';
+    if (status) {
+        status.className = 'preview-status loading';
+        status.textContent = '⏳ 检测人脸...';
+    }
 
     // 隐藏摄像头
-    $(videoId).parentElement.style.display = 'none';
-    $(captureBtnId).disabled = true;
-    $(startBtnId).textContent = '📷 重新开启';
+    const videoWrapper = $(videoId)?.parentElement;
+    if (videoWrapper) {
+        videoWrapper.style.display = 'none';
+    }
+
+    const captureBtn = $(captureBtnId);
+    if (captureBtn) captureBtn.disabled = true;
+
+    const startBtn = $(startBtnId);
+    if (startBtn) startBtn.textContent = '📷 重新开启';
 
     // 检测人脸
     detectFace(base64, type);
