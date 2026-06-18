@@ -8,7 +8,7 @@ import sys
 import os
 
 from config import get_settings
-from routes import auth, users, attendance
+from routes import users, attendance  # ⚠️ 移除 auth
 from utils.database import init_db
 
 settings = get_settings()
@@ -80,7 +80,6 @@ else:
         return {"status": "ok", "message": "前端页面未找到"}
 
 # ========== API路由 ==========
-app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(users.router, prefix="/api/users", tags=["用户"])
 app.include_router(attendance.router, prefix="/api/attendance", tags=["签到"])
 

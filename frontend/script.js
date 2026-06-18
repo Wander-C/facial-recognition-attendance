@@ -152,7 +152,8 @@ async function handleLogin(e) {
     showLoading('登录中...');
 
     try {
-        const resp = await fetch(`${API_BASE}/auth/login`, {
+        // ⚠️ 修改：将 /auth/login 改为 /users/login
+        const resp = await fetch(`${API_BASE}/users/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id, password })
@@ -221,7 +222,8 @@ async function handleRegister(e) {
     showLoading('注册中...');
 
     try {
-        const resp = await fetch(`${API_BASE}/auth/register`, {
+        // ⚠️ 修改：将 /auth/register 改为 /users/register
+        const resp = await fetch(`${API_BASE}/users/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -705,7 +707,7 @@ async function loadRecords(reset = true) {
 
     try {
         const resp = await fetch(
-            `${API_BASE}/attendance/my-records?offset=${recordsSkip}&limit=${RECORDS_LIMIT}`,
+            `${API_BASE}/attendance/my-records?skip=${recordsSkip}&limit=${RECORDS_LIMIT}`,
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
         );
 
@@ -714,10 +716,24 @@ async function loadRecords(reset = true) {
             return;
         }
 
-        const data = await resp.json();
-        $('recordsCount').textContent = `共 ${data.total} 条`;
+        // ⚠️ 添加响应检查
+        if (!resp.ok) {
+            const errorData = await resp.json().catch(() => ({}));
+            showToast(errorData.detail || '加载记录失败', 'error');
+            return;
+        }
 
-        if (data.total === 0) {
+        const data = await resp.json();
+
+        // ⚠️ 检查 data 是否有效
+        if (!data || typeof data !== 'object') {
+            showToast('加载记录失败：数据格式错误', 'error');
+            return;
+        }
+
+        $('recordsCount').textContent = `共 ${data.total || 0} 条`;
+
+        if (data.total === 0 || !data.records || data.records.length === 0) {
             $('recordsList').innerHTML = `
                 <div class="empty-state">
                     <span class="empty-icon">📭</span>
@@ -757,6 +773,7 @@ async function loadRecords(reset = true) {
 
     } catch (err) {
         console.error('加载记录失败', err);
+        showToast('加载记录失败: ' + err.message, 'error');
     }
 }
 
@@ -777,12 +794,14 @@ async function loadProfileData() {
         });
         if (resp1.ok) {
             const data = await resp1.json();
-            if (data.has_signed) {
-                $('profileTodayStatus').textContent = `✅ 已签到 (${new Date(data.sign_time).toLocaleTimeString()})`;
-                $('profileTodayStatus').style.color = '#2e7d32';
-            } else {
-                $('profileTodayStatus').textContent = '❌ 未签到';
-                $('profileTodayStatus').style.color = '#c62828';
+            if (data && data.has_signed !== undefined) {
+                if (data.has_signed) {
+                    $('profileTodayStatus').textContent = `✅ 已签到 (${new Date(data.sign_time).toLocaleTimeString()})`;
+                    $('profileTodayStatus').style.color = '#2e7d32';
+                } else {
+                    $('profileTodayStatus').textContent = '❌ 未签到';
+                    $('profileTodayStatus').style.color = '#c62828';
+                }
             }
         }
 
@@ -792,7 +811,9 @@ async function loadProfileData() {
         });
         if (resp2.ok) {
             const data = await resp2.json();
-            $('profileTotalSigns').textContent = `${data.total || 0} 次`;
+            if (data && data.total !== undefined) {
+                $('profileTotalSigns').textContent = `${data.total || 0} 次`;
+            }
         }
 
         // 是否有照片
@@ -801,8 +822,10 @@ async function loadProfileData() {
         });
         if (resp3.ok) {
             const data = await resp3.json();
-            $('profileHasFace').textContent = data.has_face ? '✅ 已上传' : '❌ 未上传';
-            $('profileHasFace').style.color = data.has_face ? '#2e7d32' : '#c62828';
+            if (data && data.has_face !== undefined) {
+                $('profileHasFace').textContent = data.has_face ? '✅ 已上传' : '❌ 未上传';
+                $('profileHasFace').style.color = data.has_face ? '#2e7d32' : '#c62828';
+            }
         }
 
     } catch (err) {

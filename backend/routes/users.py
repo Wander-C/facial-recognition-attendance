@@ -8,7 +8,7 @@ import logging
 
 from utils.database import get_db
 from utils.security import hash_password, verify_password
-from models.user import User
+from models.user import User  # 不需要导入 UserRole 了
 from config import get_settings
 from services.frs_service import frs_service
 
@@ -73,7 +73,7 @@ async def register(
             detail=f"人脸检测失败: {str(e)}"
         )
 
-    # 4. 保存用户
+    # 4. 保存用户（不需要设置 role）
     hashed_password = hash_password(password)
     new_user = User(
         user_id=user_id,
@@ -163,3 +163,70 @@ def get_current_user(
         )
 
     return user
+
+
+@router.get("/me")
+async def get_current_user_info(
+    current_user: User = Depends(get_current_user)
+):
+    """获取当前用户信息"""
+    return current_user.to_dict()
+
+
+@router.get("/has-face")
+async def has_face(
+    current_user: User = Depends(get_current_user)
+):
+    """检查用户是否已上传人脸照片"""
+    return {
+        "has_face": current_user.face_image_base64 is not None
+    }
+
+
+@router.post("/update-face")
+async def update_face(
+    request: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """更新用户人脸照片"""
+    face_image_base64 = request.get("face_image_base64")
+
+    if not face_image_base64:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少人脸照片数据"
+        )
+
+    if not frs_service.available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="人脸识别服务未就绪"
+        )
+
+    # 检测人脸是否有效
+    try:
+        detect_result = frs_service.detect_face(face_image_base64)
+        if not detect_result.get("has_face"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="照片中未检测到有效人脸，请重新拍摄"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"人脸检测失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"人脸检测失败: {str(e)}"
+        )
+
+    # 更新用户人脸照片
+    current_user.face_image_base64 = face_image_base64
+    db.commit()
+
+    logger.info(f"用户 {current_user.user_id} 人脸照片更新成功")
+    return {
+        "success": True,
+        "message": "人脸照片更新成功"
+    }
