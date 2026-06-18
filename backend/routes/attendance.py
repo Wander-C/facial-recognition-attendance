@@ -1,17 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, date
 from loguru import logger
 
 from utils.database import get_db
 from models.user import User
 from models.attendance_log import AttendanceLog
-from routes.auth import get_current_user
 from services.frs_service import frs_service
 from config import get_settings
+from routes.auth import get_current_user
 
 router = APIRouter()
-logger_instance = logger
 settings = get_settings()
 
 
@@ -19,7 +18,7 @@ settings = get_settings()
 async def detect_face(
         request: dict = Body(...),
 ):
-    """检测图片中是否有人脸（注册时使用）"""
+    """检测图片中是否有人脸"""
     image_base64 = request.get("image_base64")
     if not image_base64:
         raise HTTPException(
@@ -27,58 +26,40 @@ async def detect_face(
             detail="缺少图片数据"
         )
 
-    # 检查FRS服务是否可用（修改这里：检查 available 属性）
     if not frs_service.available:
-        logger_instance.error("FRS客户端未初始化，请检查华为云配置")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="人脸识别服务未就绪，请联系管理员检查华为云配置"
+            detail="人脸识别服务未就绪"
         )
 
     try:
-        # 调用FRS服务检测
         result = frs_service.detect_face(image_base64)
-
         face_count = result.get("face_count", 0)
-
-        logger_instance.info(f"人脸检测完成，检测到 {face_count} 张人脸")
-
         return {
             "success": True,
             "face_count": face_count,
             "has_face": face_count > 0,
-            "message": f"检测到{face_count}张人脸" if face_count > 0 else "未检测到人脸，请重新拍照"
+            "message": f"检测到{face_count}张人脸" if face_count > 0 else "未检测到人脸"
         }
-
     except Exception as e:
-        error_msg = str(e)
-        logger_instance.error(f"人脸检测失败: {error_msg}")
-
-        if "Token" in error_msg or "配置" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"人脸识别服务配置错误: {error_msg}"
-            )
-        elif "未检测到人脸" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="未检测到人脸，请确保照片清晰且包含完整人脸"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"人脸检测失败: {error_msg}"
-            )
+        logger.error(f"人脸检测失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"人脸检测失败: {str(e)}"
+        )
 
 
 @router.post("/sign")
 async def sign_in(
         request: dict = Body(...),
         req: Request = None,
-        current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """用户签到：将签到照片与数据库中存储的注册照片进行比对"""
+    """
+    用户签到（不需要登录）
+    通过人脸比对从照片库中检索用户
+    已签到的用户可以再次签到，但会提示已在xx时间签过到，不重复记录
+    """
     sign_image_base64 = request.get("image_base64")
     if not sign_image_base64:
         raise HTTPException(
@@ -86,131 +67,151 @@ async def sign_in(
             detail="缺少签到照片"
         )
 
-    # 检查FRS服务是否可用（修改这里：检查 available 属性）
     if not frs_service.available:
-        logger_instance.error("FRS客户端未初始化，请检查华为云配置")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="人脸识别服务未就绪，请联系管理员检查华为云配置"
+            detail="人脸识别服务未就绪"
         )
 
-    # 1. 从数据库获取该用户注册时的人脸照片
-    registered_face_base64 = current_user.face_image_base64
-    if not registered_face_base64:
+    # 1. 获取所有已注册人脸的用户
+    users_with_face = db.query(User).filter(
+        User.face_image_base64.isnot(None)
+    ).all()
+
+    if not users_with_face:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="您尚未注册人脸信息，请联系管理员"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="系统中没有已注册人脸的用户，请先注册"
         )
 
-    # 2. 检查今日是否已签到
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = today_start + timedelta(days=1)
+    # 2. 遍历比对
+    matched_user = None
+    best_similarity = 0.0
+    threshold = settings.FRS_SIMILARITY_THRESHOLD
+
+    for user in users_with_face:
+        try:
+            result = frs_service.compare_faces(
+                user.face_image_base64,
+                sign_image_base64
+            )
+            similarity = result.get("similarity", 0.0)
+            logger.info(f"比对用户 {user.user_id} ({user.real_name}) 相似度: {similarity:.4f}")
+
+            if similarity > best_similarity:
+                best_similarity = similarity
+                if similarity >= threshold:
+                    matched_user = user
+                    if similarity >= 0.95:
+                        break
+        except Exception as e:
+            logger.warning(f"比对用户 {user.user_id} 失败: {str(e)}")
+            continue
+
+    if not matched_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"人脸验证不通过，最高相似度: {best_similarity:.2%}，需大于 {threshold:.0%}"
+        )
+
+    # 3. 检查今日是否已签到（只检查，不阻止）
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
 
     existing_sign = db.query(AttendanceLog).filter(
-        AttendanceLog.user_id == current_user.id,
+        AttendanceLog.user_id == matched_user.id,
         AttendanceLog.sign_time >= today_start,
-        AttendanceLog.sign_time < today_end
+        AttendanceLog.sign_time <= today_end
     ).first()
 
+    # 4. 如果已签到，返回提示但不记录新签到
     if existing_sign:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="今日已签到，请勿重复签到"
-        )
+        return {
+            "success": True,
+            "already_signed": True,
+            "message": f"已在 {existing_sign.sign_time.strftime('%Y-%m-%d %H:%M:%S')} 签过到",
+            "user_id": matched_user.user_id,
+            "user_name": matched_user.real_name,
+            "sign_time": existing_sign.sign_time.isoformat(),
+            "similarity": float(existing_sign.similarity)
+        }
 
-    # 3. 调用华为云人脸比对服务
-    try:
-        compare_result = frs_service.compare_faces(registered_face_base64, sign_image_base64)
-        similarity = compare_result.get("similarity", 0.0)
-        threshold = settings.FRS_SIMILARITY_THRESHOLD
-
-        logger_instance.info(f"用户 {current_user.user_id} 人脸比对相似度: {similarity:.4f}, 阈值: {threshold}")
-
-        if similarity < threshold:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"人脸验证不通过 (相似度: {similarity:.2%}，需大于 {threshold:.0%})"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        logger_instance.error(f"人脸比对服务调用失败: {error_msg}")
-        if "未检测到人脸" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="未检测到人脸，请确保照片清晰且包含完整人脸"
-            )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"签到服务异常: {error_msg}"
-        )
-
-    # 4. 记录签到成功
+    # 5. 记录签到
     client_ip = req.client.host if req else None
 
     attendance_log = AttendanceLog(
-        user_id=current_user.id,
+        user_id=matched_user.id,
         sign_time=datetime.utcnow(),
-        similarity=similarity,
+        similarity=best_similarity,
         sign_image_url=None,
         ip_address=client_ip
     )
     db.add(attendance_log)
     db.commit()
 
-    logger_instance.info(f"用户 {current_user.user_id} 签到成功，相似度: {similarity:.4f}")
+    logger.info(f"用户 {matched_user.user_id} ({matched_user.real_name}) 签到成功，相似度: {best_similarity:.4f}")
 
     return {
         "success": True,
+        "already_signed": False,
         "message": "签到成功",
-        "user_id": current_user.user_id,
-        "user_name": current_user.real_name,
+        "user_id": matched_user.user_id,
+        "user_name": matched_user.real_name,
         "sign_time": attendance_log.sign_time.isoformat(),
-        "similarity": similarity,
+        "similarity": best_similarity,
         "log_id": attendance_log.id
     }
 
 
-@router.get("/sign_in_status")
-async def get_sign_in_status(
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+@router.get("/today-status")
+async def get_today_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """获取用户今日签到状态"""
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = today_start + timedelta(days=1)
+    """获取用户今日签到状态（已签/未签）"""
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
 
-    sign_in_today = db.query(AttendanceLog).filter(
+    existing_sign = db.query(AttendanceLog).filter(
         AttendanceLog.user_id == current_user.id,
         AttendanceLog.sign_time >= today_start,
-        AttendanceLog.sign_time < today_end
+        AttendanceLog.sign_time <= today_end
     ).first()
 
-    if sign_in_today:
+    if existing_sign:
         return {
-            "has_signed_in": True,
-            "sign_time": sign_in_today.sign_time.isoformat(),
-            "similarity": float(sign_in_today.similarity)
+            "has_signed": True,
+            "sign_time": existing_sign.sign_time.isoformat(),
+            "similarity": float(existing_sign.similarity),
+            "message": f"已在 {existing_sign.sign_time.strftime('%Y-%m-%d %H:%M:%S')} 签到"
         }
     else:
-        return {"has_signed_in": False}
+        return {
+            "has_signed": False,
+            "message": "今日尚未签到"
+        }
 
 
-@router.get("/records")
-async def get_sign_in_records(
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-        limit: int = 10,
-        offset: int = 0
+@router.get("/my-records")
+async def get_my_records(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = 50,
+    offset: int = 0
 ):
-    """获取用户签到记录"""
+    """获取用户自己的签到记录（需要登录）"""
     records = db.query(AttendanceLog).filter(
         AttendanceLog.user_id == current_user.id
     ).order_by(AttendanceLog.sign_time.desc()).offset(offset).limit(limit).all()
 
+    total = db.query(AttendanceLog).filter(AttendanceLog.user_id == current_user.id).count()
+
     return {
-        "total": db.query(AttendanceLog).filter(AttendanceLog.user_id == current_user.id).count(),
+        "total": total,
+        "offset": offset,
+        "limit": limit,
         "records": [
             {
                 "id": r.id,

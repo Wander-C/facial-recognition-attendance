@@ -2,172 +2,311 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>人脸识别签到系统</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>人脸签到系统</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- 导航栏 -->
-    <nav class="navbar">
-        <div class="nav-container">
-            <h1 class="logo">📸 人脸识别签到系统</h1>
-            <div class="nav-links" id="navLinks">
-                <button class="nav-btn active" data-page="login">登录</button>
-                <button class="nav-btn" data-page="register">注册</button>
-            </div>
-            <div class="user-info" id="userInfo" style="display: none;">
-                <span id="userName">用户</span>
-                <button class="logout-btn" id="logoutBtn">退出登录</button>
-            </div>
-        </div>
-    </nav>
-
-    <!-- 主内容区 -->
-    <div class="container">
-        <!-- 登录页面 -->
-        <div id="loginPage" class="page active">
-            <div class="card">
-                <h2>🔐 用户登录</h2>
-                <form id="loginForm">
-                    <div class="form-group">
-                        <label>学号</label>
-                        <input type="text" id="loginUserID" placeholder="请输入学号" required>
-                    </div>
-                    <div class="form-group">
-                        <label>密码</label>
-                        <input type="password" id="loginPassword" placeholder="请输入密码" required>
-                    </div>
-                    <button type="submit" class="btn-primary">登录</button>
-                </form>
-                <div class="form-footer">
-                    <span>还没有账号？</span>
-                    <button type="button" id="goToRegisterBtn" class="link-btn">立即注册</button>
-                </div>
+    <!-- ===== 顶部导航 ===== -->
+    <header class="header">
+        <div class="header-content">
+            <h1 class="app-title">📸 人脸签到系统</h1>
+            <div class="header-actions">
+                <span id="headerUser" class="header-user" style="display:none;">
+                    👤 <span id="headerUserName">用户</span>
+                </span>
+                <button class="header-btn" id="headerLoginBtn" onclick="switchTab('login')">登录</button>
+                <button class="header-btn logout" id="headerLogoutBtn" style="display:none;" onclick="handleLogout()">退出</button>
             </div>
         </div>
+    </header>
 
-        <!-- 注册页面 -->
-        <div id="registerPage" class="page">
-            <div class="card">
-                <h2>📝 用户注册</h2>
-                <form id="registerForm">
-                    <div class="form-group">
-                        <label>学号</label>
-                        <input type="text" id="regUserID" placeholder="请输入学号" required>
-                    </div>
-                    <div class="form-group">
-                        <label>真实姓名</label>
-                        <input type="text" id="regRealName" placeholder="请输入真实姓名" required>
-                    </div>
-                    <div class="form-group">
-                        <label>密码</label>
-                        <input type="password" id="regPassword" placeholder="请输入密码" required>
-                    </div>
-                    <div class="form-group">
-                        <label>确认密码</label>
-                        <input type="password" id="regConfirmPassword" placeholder="请再次输入密码" required>
-                    </div>
+    <!-- ===== 主内容 ===== -->
+    <main class="main-content">
 
-                    <!-- 人脸拍照区域 -->
-                    <div class="face-capture-area">
-                        <label>人脸采集（请正对摄像头）</label>
-                        <div class="video-container">
-                            <video id="registerVideo" autoplay playsinline></video>
-                            <canvas id="registerCanvas" style="display: none;"></canvas>
-                        </div>
-                        <div class="capture-controls">
-                            <button type="button" id="startCameraBtn" class="btn-secondary">📷 开启摄像头</button>
-                            <button type="button" id="capturePhotoBtn" class="btn-secondary" disabled>📸 拍照</button>
-                        </div>
-
-                        <!-- 拍照后的确认区域 -->
-                        <div id="capturedPhotoArea" style="display: none;">
-                            <div class="captured-photo-container">
-                                <img id="capturedPhotoImg" alt="拍摄的照片">
-                                <div class="captured-buttons">
-                                    <button type="button" id="confirmPhotoBtn" class="btn-primary" disabled>✅ 确认使用此照片</button>
-                                    <button type="button" id="retakePhotoBtn" class="btn-secondary">📷 重新拍照</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 人脸检测结果 -->
-                        <div id="faceDetectResult" class="face-detect-result" style="display: none;">
-                            <div id="detectStatus"></div>
-                        </div>
-
-                        <!-- 最终预览 -->
-                        <div id="registerFacePreview" class="face-preview" style="display: none;">
-                            <img id="registerPreviewImg" alt="人脸预览">
-                            <span class="preview-status" id="registerFaceStatus"></span>
-                        </div>
-                    </div>
-
-                    <button type="submit" class="btn-primary" id="registerSubmitBtn" disabled>注册</button>
-                </form>
-                <div class="form-footer">
-                    <span>已有账号？</span>
-                    <button type="button" id="goToLoginBtn" class="link-btn">立即登录</button>
-                </div>
+        <!-- ============================================================ -->
+        <!-- 页面1: 签到（公开，不需要登录） -->
+        <!-- ============================================================ -->
+        <section id="pageSign" class="page active">
+            <div class="page-header">
+                <h2>📸 签到</h2>
+                <p class="subtitle">拍照或选择照片，系统将自动识别您的身份</p>
             </div>
-        </div>
 
-        <!-- 签到页面（登录后可见） -->
-        <div id="signinPage" class="page">
             <div class="card">
-                <h2>✅ 人脸签到</h2>
-                <div class="welcome-message" id="welcomeMessage"></div>
-
-                <!-- 签到方式选择 -->
-                <div class="sign-mode">
-                    <button type="button" id="cameraModeBtn" class="mode-btn active">📷 摄像头拍照</button>
-                    <button type="button" id="uploadModeBtn" class="mode-btn">📁 上传照片</button>
+                <!-- 签到方式切换 -->
+                <div class="mode-selector">
+                    <button class="mode-btn active" id="signModeCamera">📷 拍照</button>
+                    <button class="mode-btn" id="signModeAlbum">🖼️ 相册</button>
                 </div>
 
-                <!-- 摄像头模式 -->
-                <div id="cameraMode" class="sign-mode-content">
-                    <div class="face-capture-area">
-                        <div class="video-container">
-                            <video id="signVideo" autoplay playsinline></video>
-                            <canvas id="signCanvas" style="display: none;"></canvas>
-                        </div>
-                        <div class="capture-controls">
-                            <button type="button" id="startSignCameraBtn" class="btn-secondary">🎥 开启摄像头</button>
-                            <button type="button" id="captureSignPhotoBtn" class="btn-secondary" disabled>📸 拍照签到</button>
+                <!-- 拍照模式 -->
+                <div id="signCameraArea" class="sign-area">
+                    <div class="camera-wrapper">
+                        <video id="signVideo" autoplay playsinline></video>
+                        <canvas id="signCanvas" style="display:none;"></canvas>
+                        <div class="camera-overlay">
+                            <div class="face-frame"></div>
                         </div>
                     </div>
+                    <div class="camera-controls">
+                        <button class="btn-capture" id="signCaptureBtn" disabled>
+                            <span class="capture-circle"></span>
+                        </button>
+                    </div>
+                    <button class="btn-outline" id="signStartCameraBtn">📷 开启摄像头</button>
                 </div>
 
-                <!-- 上传照片模式 -->
-                <div id="uploadMode" class="sign-mode-content" style="display: none;">
-                    <div class="upload-area">
-                        <label class="upload-label">
-                            <input type="file" id="uploadImage" accept="image/jpeg,image/png" style="display: none;">
-                            <div class="upload-box">
-                                📤 点击或拖拽上传照片
-                                <small>支持 JPG、PNG 格式</small>
-                            </div>
-                        </label>
-                        <div id="uploadPreview" class="face-preview" style="display: none;">
-                            <img id="uploadPreviewImg" alt="上传预览">
+                <!-- 相册模式 -->
+                <div id="signAlbumArea" class="sign-area" style="display:none;">
+                    <div class="upload-area" id="signUploadArea">
+                        <input type="file" id="signFileInput" accept="image/*">
+                        <div class="upload-placeholder">
+                            <span class="upload-icon">🖼️</span>
+                            <p>点击选择照片</p>
+                            <small>支持 JPG、PNG 格式</small>
                         </div>
-                        <button type="button" id="uploadSignBtn" class="btn-primary" disabled>开始签到</button>
+                        <img id="signPreviewImg" style="display:none;">
                     </div>
+                    <button class="btn-primary" id="signSubmitBtn" disabled>确认签到</button>
                 </div>
 
                 <!-- 签到结果 -->
-                <div id="signResult" class="sign-result" style="display: none;">
-                    <h3>签到结果</h3>
-                    <div id="resultContent"></div>
+                <div id="signResult" class="sign-result" style="display:none;"></div>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 页面2: 签到记录（需要登录） -->
+        <!-- ============================================================ -->
+        <section id="pageRecords" class="page">
+            <div class="page-header">
+                <h2>📋 签到记录</h2>
+                <p class="subtitle">查看您的签到历史</p>
+            </div>
+
+            <!-- 未登录提示 -->
+            <div id="recordsLoginPrompt" class="card login-prompt">
+                <div class="prompt-content">
+                    <span class="prompt-icon">🔒</span>
+                    <h3>请先登录</h3>
+                    <p>登录后查看您的签到记录</p>
+                    <button class="btn-primary" onclick="switchTab('login')">去登录</button>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <!-- 加载提示 -->
-    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+            <!-- 已登录内容 -->
+            <div id="recordsContent" style="display:none;">
+                <div class="card">
+                    <div class="records-controls">
+                        <span class="records-count" id="recordsCount">共 0 条</span>
+                        <button class="btn-outline-sm" id="recordsRefreshBtn">🔄 刷新</button>
+                    </div>
+                    <div id="recordsList" class="records-list">
+                        <div class="empty-state">
+                            <span class="empty-icon">📭</span>
+                            <p>暂无签到记录</p>
+                        </div>
+                    </div>
+                    <div class="records-load-more">
+                        <button class="btn-outline-sm" id="recordsLoadMore" style="display:none;">加载更多</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 页面3: 个人中心（需要登录） -->
+        <!-- ============================================================ -->
+        <section id="pageProfile" class="page">
+            <div class="page-header">
+                <h2>👤 个人中心</h2>
+                <p class="subtitle">查看个人信息和管理人脸照片</p>
+            </div>
+
+            <!-- 未登录 -->
+            <div id="profileNotLoggedIn" class="card login-prompt">
+                <div class="prompt-content">
+                    <span class="prompt-icon">🔒</span>
+                    <h3>请先登录</h3>
+                    <p>登录后查看个人信息和签到记录</p>
+                    <button class="btn-primary" onclick="switchTab('login')">去登录</button>
+                </div>
+            </div>
+
+            <!-- 已登录 -->
+            <div id="profileLoggedIn" style="display:none;">
+                <!-- 个人信息 -->
+                <div class="card">
+                    <div class="profile-avatar">
+                        <span class="avatar-placeholder">👤</span>
+                    </div>
+                    <div class="profile-info">
+                        <div class="profile-item">
+                            <span class="label">学号</span>
+                            <span class="value" id="profileUserID">-</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="label">姓名</span>
+                            <span class="value" id="profileName">-</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="label">人脸照片</span>
+                            <span class="value" id="profileHasFace">-</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="label">今日签到</span>
+                            <span class="value" id="profileTodayStatus">-</span>
+                        </div>
+                        <div class="profile-item">
+                            <span class="label">总签到次数</span>
+                            <span class="value" id="profileTotalSigns">-</span>
+                        </div>
+                    </div>
+                    <button class="btn-danger" id="profileLogoutBtn">退出登录</button>
+                </div>
+
+                <!-- 更新人脸照片 -->
+                <div class="card">
+                    <h3>📷 更新人脸照片</h3>
+                    <p style="font-size:13px;color:#999;margin-bottom:12px;">重新拍摄或选择照片更新你的人脸数据</p>
+
+                    <div class="face-collect-area">
+                        <div id="profileCameraWrapper" class="camera-wrapper" style="min-height:140px;">
+                            <video id="profileVideo" autoplay playsinline></video>
+                            <canvas id="profileCanvas" style="display:none;"></canvas>
+                            <div class="camera-overlay">
+                                <div class="face-frame"></div>
+                            </div>
+                        </div>
+                        <div id="profilePhotoPreview" class="photo-preview" style="display:none;">
+                            <img id="profilePreviewImg">
+                            <div class="preview-status" id="profileDetectStatus">检测中...</div>
+                        </div>
+                    </div>
+
+                    <div class="face-collect-controls">
+                        <button type="button" class="btn-outline-sm" id="profileStartCameraBtn">📷 开启摄像头</button>
+                        <button type="button" class="btn-capture-sm" id="profileCaptureBtn" disabled>拍照</button>
+                        <button type="button" class="btn-outline-sm" id="profileRetakeBtn" style="display:none;">重新拍</button>
+                        <button type="button" class="btn-outline-sm" id="profileAlbumBtn">📁 相册</button>
+                        <input type="file" id="profileFileInput" accept="image/*" style="display:none;">
+                    </div>
+
+                    <button class="btn-primary" id="profileUpdateFaceBtn" disabled style="margin-top:12px;">更新人脸照片</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 页面4: 登录 / 注册（公开） -->
+        <!-- ============================================================ -->
+        <section id="pageLogin" class="page">
+            <div class="page-header">
+                <h2>🔐 登录 / 注册</h2>
+                <p class="subtitle">登录后查看签到记录和管理人脸照片</p>
+            </div>
+
+            <div class="card">
+                <!-- Tab 切换 -->
+                <div class="auth-tabs">
+                    <button class="auth-tab active" data-auth="login">登录</button>
+                    <button class="auth-tab" data-auth="register">注册</button>
+                </div>
+
+                <!-- ===== 登录 ===== -->
+                <div id="authLogin" class="auth-form">
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label>学号</label>
+                            <input type="text" id="loginUserID" placeholder="请输入学号" required>
+                        </div>
+                        <div class="form-group">
+                            <label>密码</label>
+                            <input type="password" id="loginPassword" placeholder="请输入密码" required>
+                        </div>
+                        <button type="submit" class="btn-primary">登录</button>
+                    </form>
+                </div>
+
+                <!-- ===== 注册 ===== -->
+                <div id="authRegister" class="auth-form" style="display:none;">
+                    <form id="registerForm">
+                        <div class="form-group">
+                            <label>学号</label>
+                            <input type="text" id="regUserID" placeholder="请输入学号" required>
+                        </div>
+                        <div class="form-group">
+                            <label>真实姓名</label>
+                            <input type="text" id="regRealName" placeholder="请输入真实姓名" required>
+                        </div>
+                        <div class="form-group">
+                            <label>密码</label>
+                            <input type="password" id="regPassword" placeholder="请设置密码" required>
+                        </div>
+                        <div class="form-group">
+                            <label>确认密码</label>
+                            <input type="password" id="regConfirmPassword" placeholder="请再次输入密码" required>
+                        </div>
+
+                        <!-- 人脸采集 -->
+                        <div class="face-collect">
+                            <label>人脸照片 <span style="color:#999;font-weight:400;">（请正对摄像头）</span></label>
+                            <div class="face-collect-area">
+                                <div id="regCameraWrapper" class="camera-wrapper" style="min-height:140px;">
+                                    <video id="regVideo" autoplay playsinline></video>
+                                    <canvas id="regCanvas" style="display:none;"></canvas>
+                                    <div class="camera-overlay">
+                                        <div class="face-frame"></div>
+                                    </div>
+                                </div>
+                                <div id="regPhotoPreview" class="photo-preview" style="display:none;">
+                                    <img id="regPreviewImg">
+                                    <div class="preview-status" id="regDetectStatus">检测中...</div>
+                                </div>
+                            </div>
+
+                            <div class="face-collect-controls">
+                                <button type="button" class="btn-outline-sm" id="regStartCameraBtn">📷 开启摄像头</button>
+                                <button type="button" class="btn-capture-sm" id="regCaptureBtn" disabled>拍照</button>
+                                <button type="button" class="btn-outline-sm" id="regRetakeBtn" style="display:none;">重新拍</button>
+                                <button type="button" class="btn-outline-sm" id="regAlbumBtn">📁 相册</button>
+                                <input type="file" id="regFileInput" accept="image/*" style="display:none;">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-primary" id="regSubmitBtn" disabled>注册</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ===== 底部导航 ===== -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" data-tab="sign">
+            <span class="nav-icon">📸</span>
+            <span class="nav-label">签到</span>
+        </button>
+        <button class="nav-item" data-tab="records">
+            <span class="nav-icon">📋</span>
+            <span class="nav-label">记录</span>
+        </button>
+        <button class="nav-item" data-tab="profile">
+            <span class="nav-icon">👤</span>
+            <span class="nav-label">我的</span>
+        </button>
+        <button class="nav-item" data-tab="login">
+            <span class="nav-icon">🔐</span>
+            <span class="nav-label">登录</span>
+        </button>
+    </nav>
+
+    <!-- ===== 加载遮罩 ===== -->
+    <div id="loadingOverlay" class="loading-overlay" style="display:none;">
         <div class="loading-spinner"></div>
-        <p>处理中...</p>
+        <p id="loadingText">处理中...</p>
     </div>
 
     <script src="script.js"></script>

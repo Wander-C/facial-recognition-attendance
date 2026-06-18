@@ -3,7 +3,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
-from typing import Optional
 import logging
 
 from utils.database import get_db
@@ -23,13 +22,12 @@ async def register(
         request: dict = Body(...),
         db: Session = Depends(get_db)
 ):
-    """用户注册：检测人脸后，直接将照片Base64存入数据库"""
+    """用户注册：填写基本信息 + 上传人脸照片"""
     user_id = request.get("user_id")
     password = request.get("password")
     real_name = request.get("real_name")
     face_image_base64 = request.get("face_image_base64")
 
-    # 1. 基础校验
     if not user_id or not password or not real_name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -42,7 +40,6 @@ async def register(
             detail="请先拍照上传人脸"
         )
 
-    # 2. 检查用户是否已存在
     existing_user = db.query(User).filter(User.user_id == user_id).first()
     if existing_user:
         raise HTTPException(
@@ -50,7 +47,12 @@ async def register(
             detail="学号已存在"
         )
 
-    # 3. 使用华为云API检测人脸是否有效
+    if not frs_service.available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="人脸识别服务未就绪"
+        )
+
     try:
         detect_result = frs_service.detect_face(face_image_base64)
         if not detect_result.get("has_face"):
@@ -61,13 +63,12 @@ async def register(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"人脸检测API调用失败: {str(e)}")
+        logger.error(f"人脸检测失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"人脸检测服务异常: {str(e)}"
+            detail=f"人脸检测失败: {str(e)}"
         )
 
-    # 4. 保存用户信息（包含原始人脸照片Base64）
     hashed_password = hash_password(password)
     new_user = User(
         user_id=user_id,
@@ -103,7 +104,6 @@ async def login(
             detail="请填写学号和密码"
         )
 
-    # 查找用户
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(
@@ -111,14 +111,12 @@ async def login(
             detail="学号或密码错误"
         )
 
-    # 验证密码
     if not verify_password(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="学号或密码错误"
         )
 
-    # 生成Token
     expires_delta = timedelta(hours=settings.JWT_EXPIRATION_HOURS)
     expire = datetime.utcnow() + expires_delta
     to_encode = {"sub": str(user.id), "user_id": user.user_id, "exp": expire}
@@ -160,16 +158,3 @@ def get_current_user(
         )
 
     return user
-
-
-def get_current_user_optional(
-        credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-        db: Session = Depends(get_db)
-) -> User | None:
-    """获取当前登录用户（可选）"""
-    try:
-        if credentials is None:
-            return None
-        return get_current_user(credentials, db)
-    except HTTPException:
-        return None
