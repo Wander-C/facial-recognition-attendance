@@ -73,13 +73,16 @@ async def register(
             detail=f"人脸检测失败: {str(e)}"
         )
 
-    # 4. 保存用户（不需要设置 role）
+    # 4. 保存用户（使用系统本地时间）
+    now = datetime.now()  # 使用系统本地时间，与 attendance.py 保持一致
     hashed_password = hash_password(password)
     new_user = User(
         user_id=user_id,
         password_hash=hashed_password,
         real_name=real_name,
-        face_image_base64=face_image_base64
+        face_image_base64=face_image_base64,
+        created_at=now,  # 显式设置创建时间
+        updated_at=now  # 显式设置更新时间
     )
     db.add(new_user)
     db.commit()
@@ -175,7 +178,7 @@ async def get_current_user_info(
 
 @router.get("/has-face")
 async def has_face(
-    current_user: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_user)
 ):
     """检查用户是否已上传人脸照片"""
     return {
@@ -185,9 +188,9 @@ async def has_face(
 
 @router.post("/update-face")
 async def update_face(
-    request: dict = Body(...),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        request: dict = Body(...),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """更新用户人脸照片"""
     face_image_base64 = request.get("face_image_base64")
@@ -221,11 +224,13 @@ async def update_face(
             detail=f"人脸检测失败: {str(e)}"
         )
 
-    # 更新用户人脸照片
+    # 更新用户人脸照片（使用系统本地时间）
+    now = datetime.now()  # 使用系统本地时间
     current_user.face_image_base64 = face_image_base64
+    current_user.updated_at = now  # 显式设置更新时间
     db.commit()
 
-    logger.info(f"用户 {current_user.user_id} 人脸照片更新成功")
+    logger.info(f"用户 {current_user.user_id} 人脸照片更新成功，更新时间: {now}")
     return {
         "success": True,
         "message": "人脸照片更新成功"

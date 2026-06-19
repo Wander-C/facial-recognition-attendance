@@ -852,14 +852,61 @@ async function loadRecords(reset = true) {
 // 个人中心数据
 // ============================================================
 async function loadProfileData() {
-    if (!accessToken) return;
+    if (!accessToken) {
+        console.warn('⚠️ 未登录，无法加载个人数据');
+        return;
+    }
 
     try {
+        console.log('📡 开始加载个人中心数据...');
+
+        // ========== 1. 获取用户信息（包含 updated_at）==========
+        const resp0 = await fetch(`${API_BASE}/users/me`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        console.log('📡 /api/users/me 响应状态:', resp0.status);
+
+        if (resp0.ok) {
+            const userData = await resp0.json();
+            console.log('📡 [users/me] 完整响应:', JSON.stringify(userData, null, 2));
+
+            // 更新基本信息
+            if (userData.user_id) {
+                $('profileUserID').textContent = userData.user_id;
+            }
+            if (userData.real_name) {
+                $('profileName').textContent = userData.real_name;
+            }
+
+            // 更新 updated_at
+            if (userData.updated_at) {
+                const updateTime = new Date(userData.updated_at);
+                const timeStr = updateTime.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+                console.log('📡 格式化后的更新时间:', timeStr);
+                $('profileLastUpdate').textContent = timeStr;
+            } else {
+                console.warn('⚠️ updated_at 为空');
+                $('profileLastUpdate').textContent = '暂无';
+            }
+        } else {
+            console.error('❌ 获取用户信息失败:', resp0.status);
+        }
+
+        // ========== 2. 获取今日签到状态 ==========
         const resp1 = await fetch(`${API_BASE}/attendance/today-status`, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         if (resp1.ok) {
             const data = await resp1.json();
+            console.log('📡 [today-status] 响应:', data);
             if (data && data.has_signed !== undefined) {
                 if (data.has_signed) {
                     const count = data.today_count || 1;
@@ -873,6 +920,7 @@ async function loadProfileData() {
             }
         }
 
+        // ========== 3. 获取总签到次数 ==========
         const resp2 = await fetch(`${API_BASE}/attendance/my-records?limit=1`, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
         });
@@ -883,6 +931,7 @@ async function loadProfileData() {
             }
         }
 
+        // ========== 4. 检查是否有人脸 ==========
         const resp3 = await fetch(`${API_BASE}/users/has-face`, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
         });
@@ -894,8 +943,10 @@ async function loadProfileData() {
             }
         }
 
+        console.log('✅ 个人中心数据加载完成');
+
     } catch (err) {
-        console.error('加载个人数据失败', err);
+        console.error('❌ 加载个人数据失败:', err);
     }
 }
 
